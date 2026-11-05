@@ -13,7 +13,7 @@ let ruleSeq = 0;
 
 export type Acquired = { ok: true; bytes: ArrayBuffer; mime: string } | { ok: false; status?: number; error: string };
 
-async function withReferer<T>(imageUrl: string, pageUrl: string, fn: () => Promise<T>): Promise<T> {
+export async function withReferer<T>(imageUrl: string, pageUrl: string, fn: () => Promise<T>): Promise<T> {
   const dnr = (ext as typeof chrome).declarativeNetRequest;
   if (!dnr?.updateSessionRules) return fn();
   const id = RULE_BASE + (ruleSeq++ % 500);

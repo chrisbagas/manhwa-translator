@@ -4,6 +4,7 @@
 import { ext, loadSettings } from '../shared/browser';
 import type { BgMessage, ContentCommand, TranslateResponse } from '../shared/types';
 import { base64ToBytes, fetchImage } from './acquire';
+import { engineCancel, engineHealth, engineProcess, engineTranslateTexts } from './engine';
 import { cancelRequests, health, isLoopbackUrl, translateImage, translateTexts } from './service';
 
 const inflight = new Map<string, AbortController>();
@@ -11,6 +12,7 @@ const BG_TYPES = new Set(['translate-image', 'cancel', 'health', 'translate-text
 
 async function handleTranslate(msg: Extract<BgMessage, { type: 'translate-image' }>): Promise<TranslateResponse> {
   const s = await loadSettings();
+  if (s.engine === 'builtin') return engineProcess(s, msg);
   if (!isLoopbackUrl(s.serviceUrl)) {
     return { ok: false, code: 'service-error', error: 'Service URL must be a loopback address (127.0.0.1 / localhost).' };
   }
@@ -46,14 +48,20 @@ ext.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
         return handleTranslate(msg);
       case 'cancel': {
         for (const id of msg.ids) inflight.get(id)?.abort();
-        await cancelRequests(await loadSettings(), msg.ids);
+        const s = await loadSettings();
+        if (s.engine === 'builtin') await engineCancel(msg.ids);
+        else await cancelRequests(s, msg.ids);
         return { ok: true };
       }
-      case 'health':
-        return health(await loadSettings());
+      case 'health': {
+        const s = await loadSettings();
+        return s.engine === 'builtin' ? engineHealth(!!(msg as { load?: boolean }).load) : { ...(await health(s)), engine: 'service' };
+      }
       case 'translate-text':
         try {
-          return { ok: true, translations: await translateTexts(await loadSettings(), msg.texts) };
+          const s = await loadSettings();
+          if (s.engine === 'builtin') return await engineTranslateTexts(msg.texts, s.glossary);
+          return { ok: true, translations: await translateTexts(s, msg.texts) };
         } catch (e) {
           return { ok: false, error: (e as Error).message };
         }

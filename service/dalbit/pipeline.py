@@ -27,7 +27,7 @@ from .types import Region, TextLine
 
 log = logging.getLogger("dalbit")
 
-PIPELINE_VERSION = "p7"
+PIPELINE_VERSION = "p8"
 TRANSLATE_VERSION = "t4"
 SUPPORTED_SOURCES = ("ko",)  # interfaces are language-agnostic; see docs/ARCHITECTURE.md
 RTL_SOURCES = {"ja"}
@@ -78,10 +78,16 @@ class Engine:
             if self._recognizer is None:
                 choice = self.config.recognizer
                 ppocr_path = self.config.models_dir / "ppocr" / "korean_PP-OCRv5_rec_mobile.onnx"
+                onnx_dir = self.config.models_dir / "onnx"
                 if choice == "ppocr-korean":
                     from .ocr.ppocr import PPOCRKoreanRecognizer
 
                     self._recognizer = PPOCRKoreanRecognizer(ppocr_path)
+                elif choice == "onnx" or (choice == "auto" and (onnx_dir / "korean_g2.onnx").exists()):
+                    # Same weights as EasyOCR, without PyTorch.
+                    from .ocr.onnx_rec import OnnxKoreanRecognizer
+
+                    self._recognizer = OnnxKoreanRecognizer(onnx_dir, threads=self.config.threads)
                 else:
                     from .ocr.easyocr_rec import EasyOCRRecognizer
 
@@ -189,6 +195,11 @@ class Engine:
             bubble_id[i] = match
         check_cancel()
         groups = layout.group_lines(lines, bubble_id)
+        containers = []
+        for g in groups:
+            ginfo = layout.find_bubble(img, [l.bbox for l in g])
+            containers.append(ginfo.bubble.bbox if ginfo is not None and ginfo.enclosed else None)
+        groups = layout.merge_shared_containers(groups, containers)
         heights = [l.height for l in lines]
         page_median_h = float(np.median(heights)) if heights else 0.0
 
@@ -238,6 +249,8 @@ class Engine:
                 self._discarded.append({"bbox": bbox, "text": text, "confidence": round(conf, 3), "reason": "likely-artwork"})
                 continue
             regions.append(region)
+
+        layout.separate_render_boxes(regions)
 
         # Reading order (Korean / Chinese: left-to-right within a row band).
         order = layout.reading_order([(r.bbox[0], r.bbox[1], r.bbox[0] + r.bbox[2], r.bbox[1] + r.bbox[3]) for r in regions],

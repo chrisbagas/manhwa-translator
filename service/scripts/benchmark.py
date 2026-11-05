@@ -49,7 +49,7 @@ def peak_mb() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--recognizer", default="easyocr")
+    ap.add_argument("--recognizer", default="auto")
     ap.add_argument("--huge", action="store_true")
     args = ap.parse_args()
     if not (FIX / "tall_strip.png").exists():

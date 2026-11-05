@@ -16,6 +16,14 @@ export interface Style {
   angle: number;
 }
 
+export interface Bubble {
+  bbox: number[];
+  interior: number[];
+  fill: string;
+  flat: boolean;
+  shape: string;
+}
+
 export interface Line {
   quad: number[][];
   text: string;
@@ -36,7 +44,7 @@ export interface Region {
   translation_note: string;
   confidence: number;
   style: Style;
-  bubble: { bbox: number[]; interior: number[]; fill: string; flat: boolean; shape: string } | null;
+  bubble: Bubble | null;
   patch: string | null;
   patch_box: [number, number, number, number] | null;
   render_box: [number, number, number, number];
@@ -58,7 +66,10 @@ export interface PageResult {
   models: Record<string, string>;
 }
 
+export type EngineKind = 'builtin' | 'service';
+
 export interface Settings {
+  engine: EngineKind; // builtin = everything inside the browser; service = local Python service
   serviceUrl: string;
   token: string;
   sourceLang: string;
@@ -71,6 +82,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  engine: 'builtin',
   serviceUrl: 'http://127.0.0.1:47615',
   token: '',
   sourceLang: 'ko',
@@ -99,6 +111,8 @@ export type TranslateResponse =
 
 export interface HealthInfo {
   state: 'ok' | 'unauthorized' | 'unreachable' | 'error';
+  engine?: EngineKind;
+  detail?: Record<string, unknown>;
   message: string;
   version?: string;
   targets?: string[];
@@ -109,7 +123,7 @@ export interface HealthInfo {
 export type BgMessage =
   | { type: 'translate-image'; id: string; url?: string; dataBase64?: string; mime?: string; pageUrl: string; attempt?: number }
   | { type: 'cancel'; ids: string[] }
-  | { type: 'health' }
+  | { type: 'health'; load?: boolean }
   | { type: 'translate-text'; texts: string[] };
 
 // popup/background -> content

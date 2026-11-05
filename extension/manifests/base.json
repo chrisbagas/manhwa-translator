@@ -2,18 +2,58 @@
   "manifest_version": 3,
   "name": "Dalbit — Manhwa Translator",
   "short_name": "Dalbit",
-  "version": "0.1.0",
-  "description": "Translate manhwa and manga chapters in place with OCR and translation running on your own computer.",
-  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
-  "action": { "default_popup": "popup.html", "default_title": "Dalbit", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
-  "permissions": ["activeTab", "scripting", "storage", "declarativeNetRequestWithHostAccess"],
-  "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
+  "version": "0.2.0",
+  "description": "Translate manhwa and manga chapters in place. OCR and translation run on your own computer: inside the browser, or via an optional local service.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Dalbit",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
   "web_accessible_resources": [
-    { "resources": ["fonts/*.ttf"], "matches": ["<all_urls>"] }
+    {
+      "resources": [
+        "fonts/*.ttf"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
   ],
   "commands": {
-    "translate-chapter": { "suggested_key": { "default": "Alt+Shift+T" }, "description": "Translate the chapter on this page" },
-    "toggle-original": { "suggested_key": { "default": "Alt+Shift+O" }, "description": "Toggle original / translated" }
+    "translate-chapter": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Translate the chapter on this page"
+    },
+    "toggle-original": {
+      "suggested_key": {
+        "default": "Alt+Shift+O"
+      },
+      "description": "Toggle original / translated"
+    }
   },
-  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" }
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

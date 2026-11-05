@@ -147,7 +147,7 @@ async function alignment(page) {
 let exitCode = 0;
 try {
   // ---------------------------------------------------------------- 1. service unavailable
-  await setSettings({ serviceUrl: `http://127.0.0.1:${DEAD_PORT}`, token: TOKEN });
+  await setSettings({ engine: 'service', serviceUrl: `http://127.0.0.1:${DEAD_PORT}`, token: TOKEN });
   const page = await ctx.newPage();
   if (process.env.E2E_DEBUG) page.on('console', (m) => console.log('[page]', m.text()));
   await page.goto(`${SITE}/chapter.html`);

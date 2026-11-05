@@ -16,6 +16,12 @@
 
   <details id="settings">
     <summary>Settings</summary>
+    <label>Engine
+      <select id="engine">
+        <option value="builtin">Built-in (runs in the browser, nothing to install)</option>
+        <option value="service">Local service (faster on big chapters; needs Python)</option>
+      </select>
+    </label>
     <label>Target language
       <select id="targetLang"><option value="en">English</option></select>
     </label>
@@ -32,12 +38,14 @@
     <label>Glossary <small>(one per line: 민준 = Minjun)</small>
       <textarea id="glossary" rows="3" spellcheck="false"></textarea>
     </label>
-    <label>Pairing token <small>(<code>python -m dalbit token</code>)</small>
-      <input id="token" type="password" autocomplete="off">
-    </label>
-    <label>Service URL <small>(loopback only)</small>
-      <input id="serviceUrl" type="url">
-    </label>
+    <div id="serviceFields">
+      <label>Pairing token <small>(<code>python -m dalbit token</code>)</small>
+        <input id="token" type="password" autocomplete="off">
+      </label>
+      <label>Service URL <small>(loopback only)</small>
+        <input id="serviceUrl" type="url">
+      </label>
+    </div>
     <button id="save">Save settings</button>
     <button id="grant" hidden>Allow access to page images</button>
   </details>

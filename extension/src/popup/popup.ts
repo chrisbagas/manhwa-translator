@@ -1,5 +1,5 @@
 import { ext, formatGlossary, loadSettings, parseGlossary, saveSettings } from '../shared/browser';
-import type { ContentCommand, HealthInfo, SfxMode } from '../shared/types';
+import type { ContentCommand, EngineKind, HealthInfo, SfxMode } from '../shared/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const LANG_NAMES: Record<string, string> = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', id: 'Indonesian', vi: 'Vietnamese', ru: 'Russian', pl: 'Polish', nl: 'Dutch', tr: 'Turkish' };
@@ -29,7 +29,8 @@ async function command(cmd: ContentCommand) {
 async function refreshHealth() {
   const h = (await ext.runtime.sendMessage({ type: 'health' })) as HealthInfo;
   const st = $('status');
-  st.textContent = h.state === 'ok' ? 'service ok' : h.state === 'unauthorized' ? 'needs token' : h.state === 'unreachable' ? 'service offline' : 'error';
+  const builtin = h.engine === 'builtin';
+  st.textContent = h.state === 'ok' ? (builtin ? 'built-in ready' : 'service ok') : h.state === 'unauthorized' ? 'needs token' : h.state === 'unreachable' ? 'service offline' : 'error';
   st.className = `status ${h.state === 'ok' ? 'ok' : h.state === 'unauthorized' ? 'warn' : 'bad'}`;
   st.title = h.message;
   if (h.state !== 'ok') showMsg(h.message);
@@ -51,7 +52,11 @@ async function init() {
   $<HTMLTextAreaElement>('glossary').value = formatGlossary(s.glossary);
   $<HTMLInputElement>('token').value = s.token;
   $<HTMLInputElement>('serviceUrl').value = s.serviceUrl;
-  if (!s.token) $<HTMLDetailsElement>('settings').open = true;
+  $<HTMLSelectElement>('engine').value = s.engine;
+  const showService = () => ($('serviceFields').hidden = $<HTMLSelectElement>('engine').value !== 'service');
+  showService();
+  $('engine').addEventListener('change', showService);
+  if (s.engine === 'service' && !s.token) $<HTMLDetailsElement>('settings').open = true;
 
   $<HTMLInputElement>('textScale').addEventListener('input', async (e) => {
     const v = Number((e.target as HTMLInputElement).value);
@@ -60,13 +65,14 @@ async function init() {
   });
   $('save').addEventListener('click', async () => {
     const url = $<HTMLInputElement>('serviceUrl').value.trim().replace(/\/+$/, '');
-    try {
+    if ($<HTMLSelectElement>('engine').value === 'service') try {
       const u = new URL(url);
       if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw new Error();
     } catch {
       return showMsg('Service URL must be http://127.0.0.1:<port> or http://localhost:<port>.');
     }
     await saveSettings({
+      engine: $<HTMLSelectElement>('engine').value as EngineKind,
       targetLang: $<HTMLSelectElement>('targetLang').value,
       sfxMode: $<HTMLSelectElement>('sfxMode').value as SfxMode,
       glossary: parseGlossary($<HTMLTextAreaElement>('glossary').value),

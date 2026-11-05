@@ -55,7 +55,11 @@ class Controller {
       this.observe();
     }
     this.rediscover();
-    const health = (await ext.runtime.sendMessage({ type: 'health' })) as { state: string; message: string };
+    if (this.settings.engine === 'builtin') {
+      this.message = 'Loading the built-in engine (first time only takes a few seconds)…';
+      this.updatePanel();
+    }
+    const health = (await ext.runtime.sendMessage({ type: 'health', load: true })) as { state: string; message: string };
     if (health?.state !== 'ok') {
       // Do not send anything anywhere; explain how to fix it instead.
       this.scheduler.running = true;

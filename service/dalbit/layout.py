@@ -19,7 +19,7 @@ from PIL import Image
 
 from .types import Bubble, Region, Style, TextLine
 
-ANALYSIS_VERSION = "layout-3"
+ANALYSIS_VERSION = "layout-4"
 
 HANGUL = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏]")
 KANA = re.compile(r"[぀-ヿ]")
@@ -79,9 +79,8 @@ class _Line:
 def _same_block(a: _Line, b: _Line, bubble_id: dict[int, int | None], ia: int, ib: int) -> bool:
     ba, bb = bubble_id.get(ia), bubble_id.get(ib)
     if ba is not None and bb is not None:
-        return ba == bb  # both inside detected bubbles: bubble identity decides
-    if (ba is None) != (bb is None):
-        return False
+        # Bubble identity: same bubble -> same block; different bubbles never merge.
+        return ba == bb
     hmax, hmin = max(a.h, b.h), min(a.h, b.h)
     if hmax / hmin > 1.7:
         return False
@@ -441,3 +440,63 @@ def place_annotation(img: np.ndarray, sfx_box, cap_w: int, cap_h: int, avoid: li
 
 def region_id(image_sha: str, bbox) -> str:
     return "r" + hashlib.sha1(f"{image_sha}:{','.join(str(int(v)) for v in bbox)}".encode()).hexdigest()[:10]
+
+
+def _iou(a, b) -> float:
+    ix = max(0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = a[2] * a[3] + b[2] * b[3] - inter
+    return inter / union if union else 0.0
+
+
+def merge_shared_containers(groups: list[list[TextLine]], containers: list[list[int] | None]) -> list[list[TextLine]]:
+    """Blocks inside the same enclosed bubble/box become one block (one render box)."""
+    parent = list(range(len(groups)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(groups)):
+        for j in range(i + 1, len(groups)):
+            a, b = containers[i], containers[j]
+            if a is not None and b is not None and _iou(a, b) > 0.7:
+                parent[find(i)] = find(j)
+    merged: dict[int, list[TextLine]] = {}
+    for i, g in enumerate(groups):
+        merged.setdefault(find(i), []).extend(g)
+    return [sort_lines(g) for g in merged.values()]
+
+
+def separate_render_boxes(regions) -> None:
+    """A region's drawing box must never cover another region's text."""
+    for r in regions:
+        if r.render_mode in ("marker", "hidden", "annotate"):
+            continue
+        x, y, w, h = r.render_box
+        x0, y0, x1, y1 = x, y, x + w, y + h
+        for o in regions:
+            if o is r:
+                continue
+            ox0, oy0 = o.bbox[0], o.bbox[1]
+            ox1, oy1 = ox0 + o.bbox[2], oy0 + o.bbox[3]
+            if min(x1, ox1) <= max(x0, ox0) or min(y1, oy1) <= max(y0, oy0):
+                continue
+            # Cut along the axis with the clearer separation from our own text.
+            rx0, ry0 = r.bbox[0], r.bbox[1]
+            rx1, ry1 = rx0 + r.bbox[2], ry0 + r.bbox[3]
+            if oy0 >= ry1:
+                y1 = min(y1, oy0 - 2)
+            elif oy1 <= ry0:
+                y0 = max(y0, oy1 + 2)
+            elif ox0 >= rx1:
+                x1 = min(x1, ox0 - 2)
+            elif ox1 <= rx0:
+                x0 = max(x0, ox1 + 2)
+        # Never smaller than our own text box.
+        x0, y0 = min(x0, r.bbox[0]), min(y0, r.bbox[1])
+        x1, y1 = max(x1, r.bbox[0] + r.bbox[2]), max(y1, r.bbox[1] + r.bbox[3])
+        r.render_box = [int(x0), int(y0), int(x1 - x0), int(y1 - y0)]

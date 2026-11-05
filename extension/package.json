@@ -1,25 +1,32 @@
 {
   "name": "dalbit-extension",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dalbit: translate manhwa/manga chapters in place using a local OCR + translation service",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/fetch-models.mjs && node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "node test/e2e/run.mjs",
     "lint:firefox": "web-ext lint --source-dir dist/firefox",
-    "package": "node scripts/build.mjs && web-ext build --source-dir dist/firefox --artifacts-dir dist/packages --overwrite-dest --filename dalbit-firefox-{version}.zip && node scripts/zip-chrome.mjs"
+    "package": "node scripts/build.mjs && web-ext build --source-dir dist/firefox --artifacts-dir dist/packages --overwrite-dest --filename dalbit-firefox-{version}.zip && node scripts/zip-chrome.mjs",
+    "fetch-models": "node scripts/fetch-models.mjs",
+    "build:only": "node scripts/build.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",
     "esbuild": "^0.25.12",
+    "fflate": "^0.8.3",
     "jsdom": "^26.1.0",
     "typescript": "5.8",
     "vitest": "^3.2.7",
     "web-ext": "^8.10.0"
+  },
+  "dependencies": {
+    "@browsermt/bergamot-translator": "^0.4.9",
+    "onnxruntime-web": "^1.31.1"
   }
 }
