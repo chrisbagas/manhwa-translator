@@ -1,0 +1,32 @@
+[project]
+name = "dalbit-service"
+version = "0.1.0"
+description = "Local OCR + translation service for the Dalbit manhwa translator extension"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+  "aiohttp>=3.9",
+  "numpy>=1.26",
+  "opencv-python-headless>=4.8",
+  "pillow>=10.1",
+  "rapidocr>=3.4",
+  "onnxruntime>=1.17",
+  "easyocr>=1.7.1",
+  "torch>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-aiohttp>=1.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dalbit", "dalbit.ocr", "dalbit.translate"]

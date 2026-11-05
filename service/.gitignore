@@ -1,0 +1,10 @@
+.venv/
+models/
+__pycache__/
+*.pyc
+tests/fixtures/generated/
+tests/fonts/*.ttf
+bergamot_host/node_modules/
+.pytest_cache/
+*.dalbit.json
+*.preview.png
