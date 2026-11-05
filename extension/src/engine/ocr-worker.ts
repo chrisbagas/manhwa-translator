@@ -106,7 +106,7 @@ function init(preference: string) {
       ]);
       tessInfo = 'on';
     } catch (e) {
-      tessInfo = `unavailable: ${(e as Error)?.message ?? e}`;
+      tessInfo = `unavailable: ${e instanceof Error ? e.message : JSON.stringify(e) ?? String(e)}`;
     }
     const tried: Record<string, unknown>[] = [];
     for (const name of order) {
