@@ -1,7 +1,7 @@
 {
   "name": "dalbit-extension",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Dalbit: translate manhwa/manga chapters in place using a local OCR + translation service",
   "license": "UNLICENSED",
   "type": "module",
