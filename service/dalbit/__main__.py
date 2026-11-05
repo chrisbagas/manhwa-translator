@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import resource
 import shutil
 import sys
 import time
@@ -40,7 +39,12 @@ def _cmd_translate(args, cfg: Config) -> int:
         print(f"{p.name}: {len(result['regions'])} regions in {dt:.2f}s  cache={result['cache']}  -> {out_png}")
         for r in result["regions"]:
             print(f"  #{r['order']} [{r['kind']:9s}] conf={r['confidence']:.2f} {r['source_text']!r} -> {r['translated_text']!r} ({r['render_mode']})")
-    print(f"max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024} MB")
+    try:
+        import resource  # POSIX only
+
+        print(f"max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024} MB")
+    except ImportError:
+        pass
     return 0
 
 

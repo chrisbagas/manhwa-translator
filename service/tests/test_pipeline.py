@@ -141,3 +141,14 @@ def test_rejects_non_images(engine):
 
     with pytest.raises(ImageRejected):
         engine.process(b"<html>not an image</html>")
+
+
+@pytest.mark.parametrize("name", [f"chapter_{i:02d}" for i in range(1, 7)])
+def test_chapter_pages_have_no_artwork_false_positives(engine, fixtures, name):
+    gt = load_gt(fixtures, name)
+    res = _run(engine, fixtures, name)
+    assert len(res["regions"]) == len(gt["blocks"]), [(r["source_text"], r["kind"]) for r in res["regions"]]
+    for d in res.get("discarded", []):
+        assert d["reason"] == "likely-artwork"
+    if res.get("discarded"):
+        assert any("not shown" in w for w in res["warnings"]), "discarded detections must be reported"

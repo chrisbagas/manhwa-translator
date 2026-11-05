@@ -27,7 +27,7 @@ from .types import Region, TextLine
 
 log = logging.getLogger("dalbit")
 
-PIPELINE_VERSION = "p5"
+PIPELINE_VERSION = "p7"
 TRANSLATE_VERSION = "t4"
 SUPPORTED_SOURCES = ("ko",)  # interfaces are language-agnostic; see docs/ARCHITECTURE.md
 RTL_SOURCES = {"ja"}
@@ -142,9 +142,11 @@ class Engine:
         timings["recognize"] = round((time.perf_counter() - t0) * 1000, 1)
 
         t0 = time.perf_counter()
+        self._discarded = []
         regions = self._layout(img, sha, src, lines, check_cancel)
         timings["layout"] = round((time.perf_counter() - t0) * 1000, 1)
-        return {"width": w, "height": h, "tiling": tstats, "regions": [r.to_json() for r in regions]}
+        return {"width": w, "height": h, "tiling": tstats, "regions": [r.to_json() for r in regions],
+                "discarded": self._discarded}
 
     def _retry_display_lettering(self, img: np.ndarray, lines: list[TextLine], check_cancel) -> None:
         """Big / rotated / outlined lettering (sound effects) often reads better
@@ -228,6 +230,13 @@ class Engine:
                 pad = int(lh * 0.3)
                 region.render_box = [max(0, bbox[0] - pad), max(0, bbox[1] - pad), bbox[2] + 2 * pad, bbox[3] + 2 * pad]
                 region.render_mode = "overlay" if kind in ("dialogue", "narration") else "marker"
+            # Detector hits on artwork that the recogniser cannot read as the
+            # source script are almost always lines/hatching, not text. Keep
+            # them out of the overlay but report them (never silently).
+            no_letters = not re.search(r"[^\W\d_]", text)
+            if info is None and len(text) <= 6 and (no_letters or (conf < 0.5 and ("no-source-script" in flags or conf < 0.12))):
+                self._discarded.append({"bbox": bbox, "text": text, "confidence": round(conf, 3), "reason": "likely-artwork"})
+                continue
             regions.append(region)
 
         # Reading order (Korean / Chinese: left-to-right within a row band).
@@ -378,6 +387,8 @@ class Engine:
         warnings = []
         if sfx_mode == "replace":
             warnings.append("Experimental SFX replacement is not available yet; showing annotations instead.")
+        if analysis.get("discarded"):
+            warnings.append(f"{len(analysis['discarded'])} unreadable detection(s) on artwork were not shown (see 'discarded').")
         if not regions:
             warnings.append("No text was detected in this image.")
         result = {
@@ -393,6 +404,7 @@ class Engine:
             "pipeline": {"pipeline": PIPELINE_VERSION, "layout": layout.ANALYSIS_VERSION, "translate": TRANSLATE_VERSION},
             "timingsMs": timings,
             "warnings": warnings,
+            "discarded": analysis.get("discarded", []),
         }
         self.cache.put("result", result_key, result)
         result["cache"] = {"analysis": analysis_hit, "result": False}
