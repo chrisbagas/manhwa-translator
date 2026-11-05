@@ -31,6 +31,6 @@ for (const name of names) {
   const raster = new ArrayRaster(w, h, new Uint8ClampedArray(readFileSync(join(dataDir, `${name}.rgba`))));
   const t = performance.now();
   const a = await analyze(raster, 'ko', { detInfer: det, recognizer: rec, encodePng: async () => 'data:image/png;base64,', checkCancel: () => {}, imageKey: name });
-  results[name] = { ms: Math.round(performance.now() - t), ...a, regions: a.regions.map((r) => ({ kind: r.kind, bbox: r.bbox, text: r.source_text, conf: r.confidence, mode: r.render_mode, patch: !!r.patch, render_box: r.render_box })) };
+  results[name] = { ms: Math.round(performance.now() - t), ...a, regions: a.regions.map((r) => ({ kind: r.kind, bbox: r.bbox, text: r.source_text, conf: r.confidence, mode: r.render_mode, patch: !!r.patch, render_box: r.render_box, flags: r.flags, bubble: r.bubble })) };
 }
 console.log(JSON.stringify({ loadMs, rssMB: Math.round(process.memoryUsage().rss / 1e6), results }));

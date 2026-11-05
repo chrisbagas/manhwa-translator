@@ -39,7 +39,7 @@ const site = http.createServer((req, res) => {
   }
   if (url.pathname === '/layout.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    return res.end(`<!doctype html><meta charset=utf-8><title>Layout</title><style>body{margin:0;background:#111}.r{max-width:570px;margin:0 auto}.r img{display:block;width:100%}${url.searchParams.get('css') ?? ''}</style><div class=r><img src="${CDN}/img/site_bubbles.png"><img src="${CDN}/img/system_box.png"></div>`);
+    return res.end(`<!doctype html><meta charset=utf-8><title>Layout</title><style>body{margin:0;background:#111}.r{max-width:570px;margin:0 auto}.r img{display:block;width:100%}${url.searchParams.get('css') ?? ''}</style><div class=r><img src="${CDN}/img/site_bubbles.png"><img src="${CDN}/img/system_box.png"><img src="${CDN}/img/double_bubble.png"></div>`);
   }
   if (url.pathname.endsWith('.html')) {
     const f = join(HERE, 'site', url.pathname);
@@ -157,7 +157,7 @@ try {
     await lp.goto(`${SITE}/layout.html?css=${encodeURIComponent(css)}`);
     await openPopupFor(lp);
     await popup.click('#translate');
-    await waitFor(lp, (s) => settled(s) && s.done === 2, 180000, `layout ${label}`);
+    await waitFor(lp, (s) => settled(s) && s.done === 3, 180000, `layout ${label}`);
     await lp.waitForTimeout(600);
     const m = await lp.evaluate(() => [...document.querySelectorAll('dalbit-layer')].map((l) => {
       const boxes = [...l.shadowRoot.querySelectorAll('.box')];
@@ -181,6 +181,8 @@ try {
     check(`[${label}] item window: one translated line per source line, no overlaps`, win.length === 10 && win.every((b) => b.line) && !overlaps.length, `${win.length} lines; overlaps ${JSON.stringify(overlaps)}`);
     check(`[${label}] item window uses one font size`, new Set(win.map((b) => b.fs)).size === 1, [...new Set(win.map((b) => b.fs))].join(','));
     check(`[${label}] site watermark is not translated`, !all.some((b) => /웹툰|뉴토끼|469/.test(b.src)));
+    const dbl = m.find((x) => x.img.startsWith('double_bubble'))?.boxes ?? [];
+    check(`[${label}] double bubble: two speeches, one sentence carried across`, dbl.length === 2 && !/[.!?]$/.test(dbl[0].text.trim()) && dbl.every((b) => !b.line && b.text), JSON.stringify(dbl.map((b) => b.text)));
     const al = await lp.evaluate(() => [...document.querySelectorAll('dalbit-layer')].map((l) => {
       const a = l.getBoundingClientRect(), b = l.previousElementSibling.getBoundingClientRect();
       return Math.max(Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.width - b.width), Math.abs(a.height - b.height));

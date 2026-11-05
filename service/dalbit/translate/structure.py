@@ -77,8 +77,8 @@ def is_structured(kind: str, lines: list[str], align: str) -> bool:
     if is_list_like(lines):
         return True
     if kind == "dialogue" and align != "left":
-        return False
-    items = sum(1 for t in lines if ITEM_LINE.search(t) or len(re.sub(r"\s", "", t)) <= 6)
+        return False  # speech bubbles flow as sentences, however short the lines
+    items = sum(1 for t in lines if ITEM_LINE.search(t))
     return items >= (len(lines) + 1) // 2
 
 
@@ -121,3 +121,30 @@ def split_across(text: str, n: int) -> list[str]:
         out.append(" ".join(words[s:c]))
         s = c
     return out + [""] * (n - len(out))
+
+
+BUBBLE_CONT = re.compile(r"(니|고|서|지만|는데|은데|던데|면|며|니까|라서|어서|아서|해서|도|거나|든지|면서|려고|자|,)$")
+
+
+def bubble_continues(text: str) -> bool:
+    t = text.strip()
+    if re.search(r"[.!?…~)\]'’\"”]$", t):
+        return False
+    return bool(BUBBLE_CONT.search(t))
+
+
+def split_weighted(text: str, weights: list[int]) -> list[str]:
+    words = text.split()
+    if len(weights) <= 1:
+        return [" ".join(words)]
+    total = sum(weights) or 1
+    length = sum(len(w) + 1 for w in words) - 1
+    out, i, acc, target = [], 0, 0.0, 0.0
+    for n, w in enumerate(weights):
+        target += w / total * length
+        part, remaining = [], len(weights) - n - 1
+        while i < len(words) - remaining and (n == len(weights) - 1 or not part or acc + len(words[i]) / 2 <= target):
+            acc += len(words[i]) + 1
+            part.append(words[i]); i += 1
+        out.append(" ".join(part))
+    return out

@@ -1,7 +1,7 @@
 {
   "name": "dalbit-extension",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Dalbit: translate manhwa/manga chapters in place using a local OCR + translation service",
   "license": "UNLICENSED",
   "type": "module",
@@ -27,6 +27,8 @@
   },
   "dependencies": {
     "@browsermt/bergamot-translator": "^0.4.9",
-    "onnxruntime-web": "^1.31.1"
+    "onnxruntime-web": "^1.31.1",
+    "tesseract.js": "^7.0.0",
+    "@tesseract.js-data/kor": "^1.0.0"
   }
 }

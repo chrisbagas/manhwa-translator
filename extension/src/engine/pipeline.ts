@@ -11,7 +11,7 @@ import type { Recognizer } from './recognize';
 import { applyGlossary, continuesOnNextLine, looksLikeSfx, romanize, scriptOk, sfxLookup, splitAcross, splitSentences, SYSTEM_TERMS_KO } from './text';
 import { DEFAULT_TILES, detectTiled, type TileConfig } from './tiling';
 
-export const ENGINE_VERSION = 'e5';
+export const ENGINE_VERSION = 'e10';
 export const RTL_SOURCES = new Set(['ja']);
 const SFX_MIN_CONF = 0.6;
 export const MIN_LINE_CONTRAST = 90; // luminance p95-p5 inside a line box
@@ -136,9 +136,11 @@ export async function analyze(r: Raster, src: string, deps: AnalyzeDeps): Promis
 async function layoutPage(r: Raster, src: string, lines: L.TextLine[], deps: AnalyzeDeps) {
   // Bubble identity per line (only used to keep different bubbles apart).
   const bubbleBoxes: number[][] = [];
+  const lineInfo = new Map<L.TextLine, L.BubbleInfo>();
   const bubbleId: (number | null)[] = lines.map((ln) => {
     const info = L.findBubble(r, [L.lineBox(ln)]);
     if (!info || !info.enclosed) return null;
+    lineInfo.set(ln, info);
     const bb = info.bubble.bbox;
     let k = bubbleBoxes.findIndex((ob) => {
       const ix = Math.max(0, Math.min(bb[0] + bb[2], ob[0] + ob[2]) - Math.max(bb[0], ob[0]));
@@ -152,7 +154,7 @@ async function layoutPage(r: Raster, src: string, lines: L.TextLine[], deps: Ana
   let groups = L.groupLines(lines, bubbleId);
   const containers = groups.map((g) => {
     const info = L.findBubble(r, g.map(L.lineBox));
-    return info && info.enclosed ? info.bubble.bbox : null;
+    return info && info.enclosed && info.bubble.shape === 'rect' ? info.bubble.bbox : null;
   });
   groups = L.mergeSharedContainers(groups, containers);
   const pageMedianH = median(lines.map(L.lineHeight));
@@ -167,7 +169,14 @@ async function layoutPage(r: Raster, src: string, lines: L.TextLine[], deps: Ana
     const text = g.map((l) => l.text).join(joiner).trim();
     const weights = g.map((l) => Math.max(1, [...l.text].length));
     const conf = g.reduce((a, l, i) => a + l.confidence * weights[i], 0) / weights.reduce((a, b) => a + b, 0);
-    const info = L.findBubble(r, boxes);
+    let info = L.findBubble(r, boxes);
+    if (!info) {
+      // A watermark or texture near part of the block can fail the block-level
+      // test; if most lines individually sit in the same enclosed bubble, use it.
+      const per = g.map((l) => lineInfo.get(l)).filter((x): x is L.BubbleInfo => !!x);
+      const same = per.filter((x) => x.bubble.bbox.join() === per[0]?.bubble.bbox.join());
+      if (per.length && same.length * 2 >= g.length) info = same[0];
+    }
     const { kind, flags } = L.classify(g, info, pageMedianH, text, src, conf, looksLikeSfx(text, src));
     const style = L.estimateStyle(r, g, info ? info.bg : null);
     const lh = median(g.map(L.lineHeight));
@@ -245,6 +254,7 @@ export async function translateRegions(regions: Region[], src: string, glossary:
   const out = regions.map((r) => ({ ...r, flags: [...r.flags] }));
   const idx: number[] = [], texts: string[] = [], lineNo: number[] = [];
   const unitsOf = new Map<number, number[][]>();
+  const chainOf = new Map<number, { ks: number[]; weights: number[] }>();
   const src_ = src;
   out.forEach((r, i) => {
     r.translation_note = '';
@@ -273,14 +283,38 @@ export async function translateRegions(regions: Region[], src: string, glossary:
     units.forEach((u) => {
       const src = lineMode ? u.map((k) => r.lines[k].text).join(' ') : r.source_text;
       // User glossary wins; system-window terms only apply in structured windows.
-      const g = applyGlossary(src, lineMode && src_ === 'ko' ? { ...SYSTEM_TERMS_KO, ...glossary } : glossary);
+      const itemLine = lineMode && u.length === 1 && ITEM_LINE.test(src) && !/(다|요|죠)[.!?]?$/.test(src.trim());
+      const g = applyGlossary(src, itemLine && src_ === 'ko' ? { ...SYSTEM_TERMS_KO, ...glossary } : glossary);
       if (g.used.some((t) => t in glossary)) r.translation_note = 'glossary';
       idx.push(i);
       texts.push(g.text);
       lineNo.push(u[0]);
     });
   });
-  const raw = await translateSegments(texts, translate);
+  // A bubble that ends mid-sentence ("~니", "~고", "~는데", ",") continues in the
+  // next bubble: translate them together, then split the English between them.
+  const order = out.map((r, i) => i).filter((i) => out[i].layout === 'paragraph' && idx.includes(i)).sort((a, b) => out[a].order - out[b].order);
+  const chains: number[][] = [];
+  for (const i of order) {
+    const last = chains[chains.length - 1];
+    const prev = last?.[last.length - 1];
+    if (last && prev !== undefined && out[prev].order === out[i].order - 1 && bubbleContinues(out[prev].source_text) && [out[prev].kind, out[i].kind].every((k) => k === 'dialogue' || k === 'narration')) last.push(i);
+    else chains.push([i]);
+  }
+  for (const chain of chains.filter((c) => c.length > 1)) {
+    const ks = chain.map((i) => idx.indexOf(i));
+    const joinedText = ks.map((k) => texts[k]).join(' ');
+    const weights = chain.map((i) => [...out[i].source_text.replace(/\s/g, '')].length);
+    texts[ks[0]] = joinedText;
+    for (const k of ks.slice(1)) texts[k] = '';
+    chainOf.set(ks[0], { ks, weights });
+  }
+  const raw0 = await translateSegments(texts.map((t) => t || '.'), translate);
+  const raw = raw0.map((t, k) => (texts[k] ? t : ''));
+  for (const [k0, { ks, weights }] of chainOf) {
+    const pieces = splitWeighted(raw[k0], weights);
+    ks.forEach((k, n) => (raw[k] = pieces[n] ?? ''));
+  }
   // Re-join per-line translations of list-like regions with hard line breaks.
   const joined = new Map<number, string[]>();
   raw.forEach((t, k) => joined.set(idx[k], [...(joined.get(idx[k]) ?? []), t]));
@@ -311,9 +345,39 @@ export function isStructured(r: Pick<Region, 'kind' | 'lines' | 'style'>): boole
   const texts = r.lines.map((l) => l.text);
   if (texts.length < 2 || r.kind === 'sfx') return false;
   if (isListLike(texts)) return true;
-  if (r.kind === 'dialogue' && r.style?.align !== 'left') return false; // speech bubbles flow as sentences
-  const items = texts.filter((t) => ITEM_LINE.test(t) || [...t.replace(/\s/g, '')].length <= 6).length;
+  const items = texts.filter((t) => ITEM_LINE.test(t)).length;
+  // Speech bubbles flow as sentences however short the lines; only left-aligned
+  // text with item markers on most lines (an item window over artwork) qualifies.
+  if (r.kind === 'dialogue' && r.style?.align !== 'left') return false;
   return items >= Math.ceil(texts.length / 2);
+}
+
+/** Korean clause endings that continue into the next bubble. */
+export function bubbleContinues(text: string): boolean {
+  const t = text.trim();
+  if (/[.!?…~)\]'’"”]$/.test(t)) return false;
+  return /(니|고|서|지만|는데|은데|던데|면|며|니까|라서|어서|아서|해서|도|거나|든지|면서|려고|자|,)$/.test(t);
+}
+
+/** Split text into parts proportional to weights, at word boundaries. */
+export function splitWeighted(text: string, weights: number[]): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (weights.length <= 1) return [words.join(' ')];
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const len = words.reduce((a, w) => a + w.length + 1, -1);
+  const out: string[] = [];
+  let i = 0, acc = 0, target = 0;
+  for (let n = 0; n < weights.length; n++) {
+    target += (weights[n] / total) * len;
+    const part: string[] = [];
+    const remaining = weights.length - n - 1;
+    while (i < words.length - remaining && (n === weights.length - 1 || !part.length || acc + words[i].length / 2 <= target)) {
+      acc += words[i].length + 1;
+      part.push(words[i++]);
+    }
+    out.push(part.join(' '));
+  }
+  return out;
 }
 
 /** Short items or items with numbers on every line (stat sheets, menus, lists). */

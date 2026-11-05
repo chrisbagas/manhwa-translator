@@ -53,6 +53,10 @@ for (const target of ['chrome', 'firefox']) {
   }
   writeFileSync(join(out, 'models/manifest.json'), JSON.stringify({ recognizers }));
   cpSync(join(root, 'assets/selftest'), join(out, 'selftest'), { recursive: true });
+  // Tesseract (Apache-2.0): worker, LSTM-only cores (SIMD + fallback), Korean model.
+  cpSync(join(root, 'node_modules/tesseract.js/dist/worker.min.js'), join(out, 'tess/worker.min.js'));
+  for (const f of ['tesseract-core-simd-lstm.wasm.js', 'tesseract-core-lstm.wasm.js']) cpSync(join(root, 'node_modules/tesseract.js-core', f), join(out, 'tess', f));
+  cpSync(join(root, 'node_modules/@tesseract.js-data/kor/4.0.0_best_int/kor.traineddata.gz'), join(out, 'tess/kor.traineddata.gz'));
   const ortDist = join(root, 'node_modules/onnxruntime-web/dist');
   for (const f of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']) cpSync(join(ortDist, f), join(out, 'ort', f));
   const bt = join(root, 'node_modules/@browsermt/bergamot-translator/worker');

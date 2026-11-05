@@ -28,8 +28,8 @@ from .types import Region, TextLine
 
 log = logging.getLogger("dalbit")
 
-PIPELINE_VERSION = "p9"
-TRANSLATE_VERSION = "t6"
+PIPELINE_VERSION = "p10"
+TRANSLATE_VERSION = "t8"
 SUPPORTED_SOURCES = ("ko",)  # interfaces are language-agnostic; see docs/ARCHITECTURE.md
 RTL_SOURCES = {"ja"}
 SFX_MODES = ("annotate", "original", "replace")
@@ -190,11 +190,13 @@ class Engine:
         # 1. Which bubble does each line sit in? (Bubble identity drives grouping.)
         bubble_boxes: list[list[int]] = []
         bubble_id: dict[int, int | None] = {}
+        line_info: dict[int, layout.BubbleInfo] = {}
         for i, ln in enumerate(lines):
             info = layout.find_bubble(img, [ln.bbox])
             if info is None or not info.enclosed:
                 bubble_id[i] = None
                 continue
+            line_info[id(ln)] = info
             bb = info.bubble.bbox
             match = None
             for j, ob in enumerate(bubble_boxes):
@@ -211,7 +213,7 @@ class Engine:
         containers = []
         for g in groups:
             ginfo = layout.find_bubble(img, [l.bbox for l in g])
-            containers.append(ginfo.bubble.bbox if ginfo is not None and ginfo.enclosed else None)
+            containers.append(ginfo.bubble.bbox if ginfo is not None and ginfo.enclosed and ginfo.bubble.shape == "rect" else None)
         groups = layout.merge_shared_containers(groups, containers)
         heights = [l.height for l in lines]
         page_median_h = float(np.median(heights)) if heights else 0.0
@@ -227,6 +229,13 @@ class Engine:
             weights = [max(1, len(l.text)) for l in g]
             conf = float(np.average([l.confidence for l in g], weights=weights))
             info = layout.find_bubble(img, boxes)
+            if info is None:
+                # A watermark near part of the block can fail the block test; use the
+                # bubble most of its lines individually sit in.
+                per = [line_info[id(l)] for l in g if id(l) in line_info]
+                same = [x for x in per if per and x.bubble.bbox == per[0].bubble.bbox]
+                if per and 2 * len(same) >= len(g):
+                    info = same[0]
             kind, flags = layout.classify(g, info, page_median_h, text, src, conf, sfxlex.looks_like_sfx(text, src))
             style = layout.estimate_style(img, g, info.bg if info is not None else None)
             lh = float(np.median([l.height for l in g]))
@@ -327,14 +336,36 @@ class Engine:
             units_of[i] = us
             for u in us:
                 part = " ".join(line_texts[k] for k in u) if line_mode else text
-                terms = {**structure.SYSTEM_TERMS_KO, **glossary} if line_mode and src == "ko" else glossary
+                item_line = line_mode and len(u) == 1 and structure.ITEM_LINE.search(part) and not re.search(r"(다|요|죠)[.!?]?$", part.strip())
+                terms = {**structure.SYSTEM_TERMS_KO, **glossary} if item_line and src == "ko" else glossary
                 g_text, used = gloss.apply(part, terms)
                 if any(t in glossary for t in used):
                     r["translation_note"] = "glossary"
                 nmt_idx.append(i)
                 nmt_texts.append(g_text)
         if nmt_texts:
-            raw = self._translate_segments(nmt_texts, src, tgt)
+            # Bubbles ending mid-sentence continue in the next bubble: translate together.
+            para = sorted({i for i in nmt_idx if regions[i].get("layout") == "paragraph"}, key=lambda i: regions[i]["order"])
+            chains: list[list[int]] = []
+            for i in para:
+                prev = chains[-1][-1] if chains else None
+                if prev is not None and regions[prev]["order"] == regions[i]["order"] - 1 and {regions[prev]["kind"], regions[i]["kind"]} <= {"dialogue", "narration"} \
+                        and structure.bubble_continues(regions[prev]["source_text"]):
+                    chains[-1].append(i)
+                else:
+                    chains.append([i])
+            chain_of = {}
+            for chain in (c for c in chains if len(c) > 1):
+                ks = [nmt_idx.index(i) for i in chain]
+                nmt_texts[ks[0]] = " ".join(nmt_texts[k] for k in ks)
+                for k in ks[1:]:
+                    nmt_texts[k] = ""
+                chain_of[ks[0]] = (ks, [len(re.sub(r"\s", "", regions[i]["source_text"])) for i in chain])
+            raw = self._translate_segments([t or "." for t in nmt_texts], src, tgt)
+            raw = [r if nmt_texts[k] else "" for k, r in enumerate(raw)]
+            for k0, (ks, weights) in chain_of.items():
+                for k, piece in zip(ks, structure.split_weighted(raw[k0], weights)):
+                    raw[k] = piece
             grouped: dict[int, list[str]] = {}
             for i, t in zip(nmt_idx, raw):
                 grouped.setdefault(i, []).append(t.strip())

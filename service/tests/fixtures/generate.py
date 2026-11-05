@@ -266,6 +266,24 @@ def make_all(out: Path) -> list[str]:
     blocks.append(Block("\n".join(head + left + right), "narration", 0, [100, 220, 520, 560], [150, 270, 330, 420]))
     save(out, "system_box", img, blocks, lines=head + left + right)
     names.append("system_box")
+    # 9. Double bubble: two lobes of ONE white shape, one sentence continuing
+    #    from the first lobe into the second, and a faint watermark across it.
+    img = artwork(720, 1000, 31)
+    d = ImageDraw.Draw(img)
+    for box in ([330, 280, 690, 520], [70, 430, 470, 760]):
+        d.ellipse(box, fill=(0, 0, 0))
+    for box in ([334, 284, 686, 516], [74, 434, 466, 756]):
+        d.ellipse(box, fill=(255, 255, 255))
+    f = font(30, 500)
+    t1, t2 = "사신 길드는\n독립성이 강하니", "자신들끼리\n따로 움직이고 있을\n가능성이 높죠."
+    d.multiline_text((510, 395), t1, font=f, fill=(15, 15, 15), anchor="mm", spacing=10, align="center")
+    d.multiline_text((270, 600), t2, font=f, fill=(15, 15, 15), anchor="mm", spacing=10, align="center")
+    wm = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(wm).multiline_text((300, 520), "가장 빠른 웹툰사이트\n웹툰왕국뉴토끼469", font=font(15, 400), fill=(150, 150, 150, 120), spacing=2)
+    img = Image.alpha_composite(img.convert("RGBA"), wm).convert("RGB")
+    save(out, "double_bubble", img, [Block(t1, "dialogue", 0, [330, 280, 360, 240]), Block(t2, "dialogue", 1, [70, 430, 400, 330])],
+         meaning="The Reaper Guild is very independent, so there's a good chance they're moving on their own.")
+    names.append("double_bubble")
     return names
 
 

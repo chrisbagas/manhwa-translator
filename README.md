@@ -33,6 +33,8 @@ OCR and translation run **on your own computer**, by default **inside the browse
   - In game-style system boxes, each line gets its own translation, drawn at the same place, left-aligned like the original, with one font size.
   - Two-column stat lists stay in two columns, and a sentence that wraps over two lines is translated as one sentence, then spread back over both lines.
   - Common system words (스탯, 민첩, 방어력, 등급…) use a built-in glossary inside these windows only.
+- **Two OCR readers, combined.** Each line is read by the Korean recogniser and by Tesseract's Korean model, which knows the full Hangul set. A small language score built from the translation model's vocabulary keeps the more plausible Korean, and Latin text and digits come from the reader that handles them. On real pages this halved character errors (10.4% → 5.1% overall; 3.2% on the three user pages).
+- **Sentences that continue across bubbles.** When a bubble ends mid-sentence ("…강하니", "…는데", "…고"), it is translated together with the next bubble and the English is split between them. Double bubbles (two lobes of one shape) are kept as two speeches.
 - **Robust rendering.** Text is measured as the browser actually draws it and must fit its box. It wraps or shrinks; it never runs off the image, even with page zoom or scaled reader containers.
 - **Site watermarks are ignored.** Faint, low-contrast lettering (such as a site's logo text) is not translated. It is reported in the results instead of being hidden silently.
 - **Corrections.** Click any translation to see the Korean original and OCR confidence, fix the Korean, re-translate just that bubble, or edit the English. Edits are saved per image.
@@ -126,12 +128,13 @@ Put your own pages in `samples/user/`. That folder is git-ignored, and the built
 
 ## Known limitations
 
-- **The default Korean recogniser knows only 913 Hangul syllables.** Common ones like 었, 봐, 뭘, 됩 and 았 are missing, so it misreads them ("있었습니다" → "있없습니다"), and those errors reach the translation. This was found on your real pages. The fix is the full-Hangul PaddleOCR model: `npm run fetch-models -- --ppocr-korean`. Its download host was blocked in my build environment, so that model is implemented, self-tested at load, and verified on the identical code path with another Paddle model, but **not yet run on Korean**.
+- **OCR is still the weakest link.** Tesseract now covers syllables the default recogniser lacks, but stylised fonts still cause misreads.
+- **The default Korean recogniser knows only 913 Hangul syllables**, and Tesseract fills most of the gaps. Common ones like 었, 봐, 뭘, 됩 and 았 are missing, so it misreads them ("있었습니다" → "있없습니다"), and those errors reach the translation. This was found on your real pages. The fix is the full-Hangul PaddleOCR model: `npm run fetch-models -- --ppocr-korean`. Its download host was blocked in my build environment, so that model is implemented, self-tested at load, and verified on the identical code path with another Paddle model, but **not yet run on Korean**.
 - **Large stylised sound effects are often not detected at all** (e.g. a huge vertical 화르륵, outlined 콰앙). The text detector is trained on ordinary text. These effects stay untouched, with no English label.
 - **Translation is sentence-level NMT** with no story context: 마수 (magical beast) comes out as "horse". Add terms to the **glossary** (`마수 = magical beast`). Names stay consistent only through the glossary.
 - **Cleanup** only happens in flat-colour containers. Text over illustrations gets a readable plate instead of inpainting. Text colour falls back to black or white when the estimated colour would be hard to read.
 - **Sites.** Readers that draw pages into `<canvas>`, scramble tiles or use CSS background images are not discovered (the panel says so).
-- **Firefox** shares all code with Chrome and passes the linter (0 errors, 1 warning from ONNX Runtime's own loader), but was not run in a real Firefox. Its built-in engine runs single-threaded.
+- **Firefox** shares all code with Chrome and passes the linter with 0 errors; its 4 warnings come from ONNX Runtime's and tesseract.js's own loaders (a webpack global-object probe that browsers never execute), but was not run in a real Firefox. Its built-in engine runs single-threaded.
 
 ## Next three improvements
 

@@ -34,7 +34,7 @@ describe('structured (line-by-line) text', () => {
     const fake = async (xs: string[]) => { seen.push(...xs); return xs.map((x) => x.replace(/[가-힣]+/g, 'K').trim()); };
     const [r] = await translateRegions([region(['필요 마나 300', '1분간 화염 스킬의', '시전 시간이 30% 단축됩니다.'])], 'ko', {}, 'annotate', fake);
     expect(r.layout).toBe('lines');
-    expect(seen).toEqual(['Mana Cost 300', '1분간 화염 Skill의 시전 시간이 30% 단축됩니다.']);
+    expect(seen).toEqual(['Mana Cost 300', '1분간 화염 스킬의 시전 시간이 30% 단축됩니다.']); // system terms only on item lines, never inside sentences
     expect(r.lines.map((l) => l.translated_text)).toHaveLength(3);
     expect(r.lines[0].translated_text).toBe('Mana Cost 300');
     expect(r.lines[1].translated_text && r.lines[2].translated_text).toBeTruthy();
@@ -42,5 +42,42 @@ describe('structured (line-by-line) text', () => {
   it('hard line breaks are respected by the fitter', () => {
     const mono: Measure = (t, size) => t.length * size * 0.5;
     expect(fitText('Power +15\nHealth +12', 200, 100, { maxPx: 20, minPx: 8, measure: mono }).lines).toEqual(['Power +15', 'Health +12']);
+  });
+});
+
+import { bubbleContinues, splitWeighted } from '../../src/engine/pipeline';
+import { combineReadings, diff, makeLM } from '../../src/engine/lm';
+
+describe('sentences across bubbles', () => {
+  it('detects clause endings that continue into the next bubble', () => {
+    expect(bubbleContinues('사신 길드는 독립성이 강하니')).toBe(true);
+    expect(bubbleContinues('지금 당장!')).toBe(false);
+    expect(bubbleContinues('살아 있습니다')).toBe(false);
+  });
+  it('splits one translation between bubbles by source length', () => {
+    expect(splitWeighted('The guild has strong independence, so it is likely that they are moving on their own.', [12, 22]))
+      .toEqual(['The guild has strong independence,', 'so it is likely that they are moving on their own.']);
+  });
+  it('translates a continued sentence once and splits it across the bubbles', async () => {
+    const r1 = region(['사신 길드는', '독립성이 강하니'], 'dialogue'); r1.style.align = 'center'; r1.order = 0; r1.id = 'a';
+    const r2 = region(['자신들끼리', '따로 움직이고 있을', '가능성이 높죠.'], 'dialogue'); r2.style.align = 'center'; r2.order = 1; r2.id = 'b';
+    const seen: string[] = [];
+    const out = await translateRegions([r1, r2], 'ko', {}, 'annotate', async (xs) => { seen.push(...xs); return xs.map(() => 'The guild is independent, so they probably move on their own.'); });
+    expect(seen.join(' ')).toContain('강하니 자신들끼리');
+    expect(out[0].layout).toBe('paragraph');
+    expect(out[0].translated_text && out[1].translated_text).toBeTruthy();
+    expect(`${out[0].translated_text} ${out[1].translated_text}`).toBe('The guild is independent, so they probably move on their own.');
+  });
+});
+
+describe('combining two OCR readings', () => {
+  // Toy LM: known Korean words score high, unknown characters low.
+  const lm = makeLM(new Map([['▁사신', -2], ['▁길드는', -2], ['▁높죠', -2], ['.', -1], ['▁', -1], ['사', -8], ['신', -8], ['킬', -9], ['드', -8], ['는', -6], ['높', -8], ['조', -8], ['죠', -8], ['L', -6], ['v', -6], ['1', -6], ['I', -6]]));
+  it('prefers the more plausible Korean and keeps the primary reader on Latin/digits', () => {
+    expect(combineReadings(lm, '사신 킬드는', '사신 길드는')).toBe('사신 길드는');
+    expect(combineReadings(lm, 'Lv.1', '[1ㅠ.1')).toBe('Lv.1');
+  });
+  it('character diff', () => {
+    expect(diff('abcd', 'abxd')).toEqual([['equal', 'ab', 'ab'], ['change', 'c', 'x'], ['equal', 'd', 'd']]);
   });
 });

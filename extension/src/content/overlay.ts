@@ -33,7 +33,9 @@ const CSS = `
 .box.line .txt { white-space: nowrap; max-width: none; }
 .box.line.wrap .txt { white-space: normal; }
 .measure { position: absolute; left: 0; top: 0; visibility: hidden; white-space: pre; pointer-events: none; contain: layout style; }
-.box.overlay .txt, .box.overflow .txt { background: var(--plate, rgba(255,255,255,0.9)); color: var(--plate-fg, #111) !important; border-radius: 6px; padding: 2px 5px; -webkit-text-stroke: 0 !important; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.box.overlay { background: var(--plate, rgba(255,255,255,0.92)); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.box.overlay .txt { color: var(--plate-fg, #111) !important; -webkit-text-stroke: 0 !important; }
+.box.overflow .txt { background: var(--plate, rgba(255,255,255,0.9)); color: var(--plate-fg, #111) !important; border-radius: 6px; padding: 2px 5px; -webkit-text-stroke: 0 !important; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
 .box.overflow { align-items: flex-start; }
 .box.overflow.collapsed .txt { max-height: 100%; overflow: hidden; }
 .more { position: absolute; right: -4px; bottom: -10px; font: 700 11px system-ui, sans-serif; background: #ffd23f; color: #000;

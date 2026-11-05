@@ -19,7 +19,7 @@ from PIL import Image
 
 from .types import Bubble, Region, Style, TextLine
 
-ANALYSIS_VERSION = "layout-6"
+ANALYSIS_VERSION = "layout-8"
 
 HANGUL = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏]")
 KANA = re.compile(r"[぀-ヿ]")
@@ -78,9 +78,8 @@ class _Line:
 
 def _same_block(a: _Line, b: _Line, bubble_id: dict[int, int | None], ia: int, ib: int) -> bool:
     ba, bb = bubble_id.get(ia), bubble_id.get(ib)
-    if ba is not None and bb is not None:
-        # Bubble identity: same bubble -> same block; different bubbles never merge.
-        return ba == bb
+    if ba is not None and bb is not None and ba != bb:
+        return False  # different bubbles never merge; same bubble still needs geometry
     hmax, hmin = max(a.h, b.h), min(a.h, b.h)
     if hmax / hmin > 1.7:
         return False
@@ -91,7 +90,8 @@ def _same_block(a: _Line, b: _Line, bubble_id: dict[int, int | None], ia: int, i
     x_overlap = min(a.x1, b.x1) - max(a.x0, b.x0)
     # Stacked lines of one block.
     if -0.5 * hmin < gap < 0.9 * hmax and x_overlap > -0.2 * hmax:
-        return abs(a.cx - b.cx) < 0.75 * max(a.x1 - a.x0, b.x1 - b.x0) or abs(a.x0 - b.x0) < hmax
+        narrower = max(1.0, min(a.x1 - a.x0, b.x1 - b.x0))
+        return x_overlap / narrower >= 0.5 or abs(a.x0 - b.x0) < hmax
     # Fragments of one line split by the detector.
     v_overlap = min(a.y1, b.y1) - max(a.y0, b.y0)
     if v_overlap > 0.6 * hmin:
@@ -250,8 +250,9 @@ def find_bubble(img: np.ndarray, boxes, *, tol: float = 28.0) -> BubbleInfo | No
         return None
     bg = np.median(ring.reshape(-1, 3), axis=0)
     dist = np.abs(ring.reshape(-1, 3).astype(np.float32) - bg).max(axis=1)
-    if (dist < tol).mean() < 0.85:
-        return None  # textured / illustrated background
+    near, faint = (dist < tol).mean(), ((dist >= tol) & (dist < 70)).mean()
+    if near < 0.85 and not (near >= 0.6 and near + faint >= 0.95):
+        return None  # textured background (faint watermark pixels do not count)
 
     bx0 = min(b[0] for b in boxes); by0 = min(b[1] for b in boxes)
     bx1 = max(b[2] for b in boxes); by1 = max(b[3] for b in boxes)

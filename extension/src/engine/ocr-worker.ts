@@ -2,6 +2,8 @@
 // ONNX Runtime Web (WASM). No network access: models come from the extension.
 
 import * as ort from 'onnxruntime-web/wasm';
+import { createWorker, OEM, PSM, type Worker as TessWorker } from 'tesseract.js';
+import { combineReadings, makeLM, parseSpm, type PieceLM } from './lm';
 import { analyze, Cancelled, type Analysis } from './pipeline';
 import { BitmapRaster } from './raster';
 import { makeRecognizer, type RecModelMeta, type Recognizer } from './recognize';
@@ -17,6 +19,38 @@ let ready: Promise<{ det: Infer; rec: Recognizer; info: Record<string, unknown> 
 const cancelled = new Set<string>();
 let recModelName = 'auto';
 type Infer = (input: Float32Array, dims: number[]) => Promise<{ data: Float32Array; dims: number[] }>;
+
+// Second reader: Tesseract's Korean LSTM (full Hangul coverage, weaker on Latin
+// and digits). Each line is read by both and the more plausible reading wins.
+const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]);
+async function initTesseract(): Promise<TessWorker> {
+  const simd = WebAssembly.validate(SIMD_PROBE);
+  const w = await createWorker('kor', OEM.LSTM_ONLY, {
+    workerPath: `${base}tess/worker.min.js`,
+    corePath: `${base}tess/tesseract-core-${simd ? 'simd-' : ''}lstm.wasm.js`,
+    langPath: `${base}tess`,
+    gzip: true,
+    cacheMethod: 'none',
+    workerBlobURL: false, // extension CSP: no blob: scripts
+  });
+  await w.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE, preserve_interword_spaces: '1' });
+  return w;
+}
+
+function withSecondReader(primary: Recognizer, tess: TessWorker, lm: PieceLM): Recognizer {
+  return {
+    meta: primary.meta,
+    async recognize(crop) {
+      const a = await primary.recognize(crop);
+      const c = new OffscreenCanvas(crop.w, crop.h);
+      c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(crop.data), crop.w, crop.h), 0, 0);
+      const { data } = await tess.recognize(c);
+      const b = data.text.replace(/\s+/g, ' ').trim();
+      const text = combineReadings(lm, a.text, b);
+      return { text, confidence: text === a.text ? a.confidence : Math.max(a.confidence, (data.confidence ?? 0) / 100) };
+    },
+  };
+}
 
 async function session(path: string): Promise<Infer> {
   const s = await ort.InferenceSession.create(`${base}${path}`, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
@@ -62,6 +96,18 @@ function init(preference: string) {
     const order = preference === 'auto' ? manifest.recognizers : [preference, ...manifest.recognizers.filter((r) => r !== preference)];
     const det = await session('models/det/PP-OCRv6_det_small.onnx');
     const test = await selfTestImage();
+    let tess: TessWorker | null = null;
+    let tessInfo = 'off';
+    let lm: PieceLM | null = null;
+    try {
+      [tess, lm] = await Promise.all([
+        initTesseract(),
+        fetch(`${base}models/bergamot/koen/vocab.koen.spm`).then(async (r) => makeLM(parseSpm(new Uint8Array(await r.arrayBuffer())))),
+      ]);
+      tessInfo = 'on';
+    } catch (e) {
+      tessInfo = `unavailable: ${(e as Error)?.message ?? e}`;
+    }
     const tried: Record<string, unknown>[] = [];
     for (const name of order) {
       if (!manifest.recognizers.includes(name)) continue;
@@ -72,7 +118,8 @@ function init(preference: string) {
       const heights = meta.family === 'ppocr' ? [meta.imgH ?? 48, 32].filter((h, i, a) => a.indexOf(h) === i) : [meta.imgH ?? 64];
       let best: { rec: Recognizer; err: number; read: string; imgH: number } | null = null;
       for (const h of heights) {
-        const rec = makeRecognizer({ ...meta, imgH: h }, infer);
+        const base_ = makeRecognizer({ ...meta, imgH: h }, infer);
+        const rec = tess && lm ? withSecondReader(base_, tess, lm) : base_;
         try {
           const r = await rec.recognize(test.img);
           const err = cer(r.text, test.text);
@@ -85,7 +132,7 @@ function init(preference: string) {
       // The verified default is always acceptable; other models must read the test line well.
       if (best && (best.err <= 0.25 || name === 'korean_g2' || order.indexOf(name) === order.length - 1)) {
         recModelName = name;
-        return { det, rec: best.rec, info: { threads: ort.env.wasm.numThreads, crossOriginIsolated: isolated, loadMs: Math.round(performance.now() - t0), recognizer: name, family: meta.family, selfTest: tried } };
+        return { det, rec: best.rec, info: { threads: ort.env.wasm.numThreads, crossOriginIsolated: isolated, loadMs: Math.round(performance.now() - t0), recognizer: tess ? `${name}+tesseract` : name, secondReader: tessInfo, family: meta.family, selfTest: tried } };
       }
     }
     throw new Error(`no usable recogniser (${JSON.stringify(tried)})`);

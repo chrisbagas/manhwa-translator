@@ -7,6 +7,12 @@ Components bundled in the browser extension:
 | Comic Neue (Craig Rozynski, Hrant Papazian) | fonts/ComicNeue-*.ttf | SIL Open Font License 1.1 (fonts/OFL-ComicNeue.txt) |
 | Atkinson Hyperlegible (Braille Institute) | fonts/AtkinsonHyperlegible-*.ttf | SIL Open Font License 1.1 (fonts/OFL-AtkinsonHyperlegible.txt) |
 | Bangers (Vernon Adams) | fonts/Bangers-Regular.ttf | SIL Open Font License 1.1 (fonts/OFL-Bangers.txt) |
+| ONNX Runtime Web (Microsoft) | ort/ | MIT |
+| PaddleOCR PP-OCRv6 detector | models/det/ | Apache-2.0 |
+| EasyOCR korean_g2 (exported to ONNX) | models/rec/ | Apache-2.0 |
+| bergamot-translator WASM + Mozilla ko-en model | bergamot/, models/bergamot/ | MPL-2.0 (translator-worker.js modified: Node shim removed) |
+| tesseract.js + tesseract.js-core (Naptha) | tess/ | Apache-2.0 |
+| Tesseract Korean LSTM model (tessdata_best int, via @tesseract.js-data/kor) | tess/kor.traineddata.gz | Apache-2.0 (upstream tessdata) |
 
 Components used by the local service (downloaded or installed separately, not bundled
 in the extension). See docs/MODELS.md for versions, checksums and details.

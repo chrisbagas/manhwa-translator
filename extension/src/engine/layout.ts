@@ -45,7 +45,9 @@ const clipBox = (x0: number, y0: number, x1: number, y1: number, w: number, h: n
 // ---------------------------------------------------------------- grouping
 
 function sameBlock(a: TextLine, b: TextLine, ba: number | null, bb: number | null): boolean {
-  if (ba !== null && bb !== null) return ba === bb;
+  // Different bubbles never merge; the same bubble still needs line geometry
+  // (two lobes of a double bubble are one white shape but separate speeches).
+  if (ba !== null && bb !== null && ba !== bb) return false;
   const A = lineBox(a), B = lineBox(b);
   const ha = Math.max(1, Math.min(A[3] - A[1], lineHeight(a))), hb = Math.max(1, Math.min(B[3] - B[1], lineHeight(b)));
   const hmax = Math.max(ha, hb), hmin = Math.min(ha, hb);
@@ -55,8 +57,9 @@ function sameBlock(a: TextLine, b: TextLine, ba: number | null, bb: number | nul
   const gap = bot[1] - top[3];
   const xOverlap = Math.min(A[2], B[2]) - Math.max(A[0], B[0]);
   if (gap > -0.5 * hmin && gap < 0.9 * hmax && xOverlap > -0.2 * hmax) {
-    const ca = (A[0] + A[2]) / 2, cb = (B[0] + B[2]) / 2;
-    return Math.abs(ca - cb) < 0.75 * Math.max(A[2] - A[0], B[2] - B[0]) || Math.abs(A[0] - B[0]) < hmax;
+    // Stacked lines of one block overlap horizontally (centred) or share a left edge.
+    const narrower = Math.max(1, Math.min(A[2] - A[0], B[2] - B[0]));
+    return xOverlap / narrower >= 0.5 || Math.abs(A[0] - B[0]) < hmax;
   }
   const vOverlap = Math.min(A[3], B[3]) - Math.max(A[1], B[1]);
   if (vOverlap > 0.6 * hmin) return Math.max(A[0], B[0]) - Math.min(A[2], B[2]) < 1.2 * hmax;
@@ -117,6 +120,8 @@ const iou = (a: number[], b: number[]) => {
   return u ? i / u : 0;
 };
 
+/** Paragraphs inside one rectangular box (system window, caption box) become one
+ *  block. Round / free-form bubbles are not merged (double bubbles = two speeches). */
 export function mergeSharedContainers(groups: TextLine[][], containers: (number[] | null)[]): TextLine[][] {
   const uf = new UnionFind(groups.length);
   for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) {
@@ -204,9 +209,15 @@ export function findBubble(r: Raster, boxes: Box4[], tol = 28): BubbleInfo | nul
   const ringSel = (i: number) => !inLine(rx0 + (i % ringImg.w), ry0 + Math.floor(i / ringImg.w));
   const bg = medianColor(ringImg, ringSel);
   if (!bg) return null;
-  let n = 0, near = 0;
-  for (let i = 0; i < ringImg.w * ringImg.h; i++) if (ringSel(i)) { n++; if (maxDiff(ringImg.data, i, bg) < tol) near++; }
-  if (!n || near / n < 0.85) return null; // textured / illustrated background
+  let n = 0, near = 0, faint = 0;
+  for (let i = 0; i < ringImg.w * ringImg.h; i++) if (ringSel(i)) {
+    n++;
+    const d = maxDiff(ringImg.data, i, bg);
+    if (d < tol) near++; else if (d < 70) faint++;
+  }
+  // Textured / illustrated background -> no cleanup. Faint pixels (a site
+  // watermark across a white bubble, anti-aliasing) do not make it textured.
+  if (!n || (near / n < 0.85 && !(near / n >= 0.6 && (near + faint) / n >= 0.95))) return null;
 
   let enclosed = false;
   let comp: Mask | null = null;

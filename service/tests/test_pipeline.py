@@ -180,3 +180,16 @@ def test_item_window_keeps_line_structure_and_boxes_do_not_overlap(engine, fixtu
             assert ix <= 0 or iy <= 0, (a, b)
     # System-window vocabulary is used (e.g. 방어력 -> Defense).
     assert any("Defense" in ln["translated_text"] for ln in lines)
+
+
+def test_double_bubble_two_speeches_one_sentence(engine, fixtures):
+    gt = load_gt(fixtures, "double_bubble")
+    res = _run(engine, fixtures, "double_bubble")
+    matched = match_regions(res, gt)
+    assert [len(matched[i]) for i in range(2)] == [1, 1], [r["source_text"] for r in res["regions"]]
+    a, b = matched[0][0], matched[1][0]
+    assert a["render_mode"] == b["render_mode"] == "replace"
+    assert a["translated_text"] and b["translated_text"]
+    # Translated together: the first half does not end a sentence on its own.
+    assert not a["translated_text"].rstrip().endswith((".", "!", "?")), a["translated_text"]
+    assert not any("뉴토끼" in r["source_text"] for r in res["regions"])
