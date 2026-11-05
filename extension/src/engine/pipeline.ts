@@ -11,7 +11,7 @@ import type { Recognizer } from './recognize';
 import { applyGlossary, looksLikeSfx, romanize, scriptOk, sfxLookup, splitSentences } from './text';
 import { DEFAULT_TILES, detectTiled, type TileConfig } from './tiling';
 
-export const ENGINE_VERSION = 'e1';
+export const ENGINE_VERSION = 'e2';
 export const RTL_SOURCES = new Set(['ja']);
 const SFX_MIN_CONF = 0.6;
 

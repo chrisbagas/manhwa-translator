@@ -56,7 +56,14 @@ for (const target of ['chrome', 'firefox']) {
   const ortDist = join(root, 'node_modules/onnxruntime-web/dist');
   for (const f of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']) cpSync(join(ortDist, f), join(out, 'ort', f));
   const bt = join(root, 'node_modules/@browsermt/bergamot-translator/worker');
-  for (const f of ['translator-worker.js', 'bergamot-translator-worker.js', 'bergamot-translator-worker.wasm']) cpSync(join(bt, f), join(out, 'bergamot', f));
+  for (const f of ['bergamot-translator-worker.js', 'bergamot-translator-worker.wasm']) cpSync(join(bt, f), join(out, 'bergamot', f));
+  // translator-worker.js (MPL-2.0): drop its Node.js-only compatibility shim
+  // (which uses eval) - browsers never run it. Modified copy, same licence.
+  const tw = readFileSync(join(bt, 'translator-worker.js'), 'utf8');
+  const a = tw.indexOf('/**\n * node.js compatibility'), b = tw.indexOf('class YAML');
+  if (a < 0 || b < a) throw new Error('unexpected bergamot translator-worker.js layout');
+  writeFileSync(join(out, 'bergamot', 'translator-worker.js'),
+    '// Modified by Dalbit: Node.js shim removed (MPL-2.0, original: @browsermt/bergamot-translator 0.4.9)\n' + tw.slice(0, a) + tw.slice(b));
   cpSync(join(root, '../LICENSE'), join(out, 'LICENSE'));
   cpSync(join(root, '../THIRD_PARTY_NOTICES.md'), join(out, 'THIRD_PARTY_NOTICES.md'));
   const opts = {
@@ -68,6 +75,8 @@ for (const target of ['chrome', 'firefox']) {
     sourcemap: false,
     minify: false, // readable output simplifies Mozilla source review
     legalComments: 'inline',
+    define: { __TARGET__: JSON.stringify(target) },
+    minifySyntax: true, // removes the other browser's dead branches; identifiers stay readable
     logLevel: 'warning',
   };
   const entryPoints = Object.fromEntries(Object.entries(entries).filter(([k]) => target === 'chrome' || k !== 'offscreen').map(([k, v]) => [k, join(root, v)]));

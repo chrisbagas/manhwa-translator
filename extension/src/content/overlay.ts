@@ -48,6 +48,23 @@ const CSS = `
 .pop button { font: inherit; margin-right: 6px; padding: 2px 8px; cursor: pointer; }
 `;
 
+/** WCAG contrast ratio between two #rrggbb colours. */
+export function contrast(a: string, b: string): number {
+  const L = (h: string) => {
+    const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const [x, y] = [L(a), L(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+/** Keep the estimated colour unless it would be hard to read on the fill. */
+export function readableColor(fg: string, fill: string | undefined): string {
+  if (!fill || !/^#[0-9a-f]{6}$/i.test(fg) || !/^#[0-9a-f]{6}$/i.test(fill)) return fg;
+  if (contrast(fg, fill) >= 3) return fg;
+  return contrast('#111111', fill) >= contrast('#ffffff', fill) ? '#111111' : '#ffffff';
+}
+
 const UNCERTAIN = new Set(['low-confidence', 'uncertain-reading', 'no-source-script', 'untranslated']);
 
 export class Layer {
@@ -181,7 +198,7 @@ export class Layer {
       fontFamily: f.family,
       fontWeight: String(r.kind === 'dialogue' && r.style.weight < 600 ? 400 : f.weight),
       fontSize: `${fit.sizePx}px`,
-      color: replace ? r.style.fg : '#111',
+      color: replace ? readableColor(r.style.fg, r.bubble?.fill) : '#111',
       textAlign: r.style.align === 'left' ? 'left' : 'center',
     });
     if (replace && r.style.outline && r.style.outline_px) {

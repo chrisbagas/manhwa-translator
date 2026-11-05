@@ -7,7 +7,9 @@ import type { HealthInfo, Settings, TranslateResponse } from '../shared/types';
 import type { EngineHost, EngineRequest, EngineStatus } from '../engine/host';
 import { fetchImage, withReferer } from './acquire';
 
-const inServiceWorker = typeof document === 'undefined';
+declare const __TARGET__: 'chrome' | 'firefox';
+// Chrome: MV3 service worker (no Web Workers) -> offscreen document. Firefox: background page.
+const inServiceWorker = __TARGET__ === 'chrome' && typeof document === 'undefined';
 let localHost: Promise<EngineHost> | null = null;
 let offscreenReady: Promise<void> | null = null;
 
@@ -23,6 +25,7 @@ function getLocalHost(): Promise<EngineHost> {
 }
 
 async function ensureOffscreen(): Promise<void> {
+  if (__TARGET__ !== 'chrome') return;
   offscreenReady ??= (async () => {
     const c = chrome as typeof chrome & { runtime: { getContexts?: (f: object) => Promise<unknown[]> } };
     const existing = (await c.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] })) ?? [];
@@ -49,6 +52,7 @@ async function call<T>(op: string, payload: Record<string, unknown> = {}): Promi
       default: return h.status as T;
     }
   }
+  if (__TARGET__ !== 'chrome') throw new Error('unreachable');
   await ensureOffscreen();
   return (await chrome.runtime.sendMessage({ target: 'engine', op, ...payload })) as T;
 }

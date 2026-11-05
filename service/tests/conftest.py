@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 FIXTURES = ROOT / "tests" / "fixtures" / "generated"
 MODELS = ROOT / "models"
 
-HAVE_MODELS = (MODELS / "easyocr" / "korean_g2.pth").exists() and (MODELS / "bergamot" / "koen").is_dir() and bool(shutil.which("node"))
+HAVE_MODELS = (MODELS / "onnx" / "korean_g2.onnx").exists() and (MODELS / "bergamot" / "koen").is_dir() and bool(shutil.which("node"))
 needs_models = pytest.mark.skipif(not HAVE_MODELS, reason="models not downloaded (scripts/download_models.py) or node missing")
 
 

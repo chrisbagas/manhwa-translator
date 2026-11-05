@@ -9,13 +9,6 @@ command -v node >/dev/null || { echo "Node.js 18+ is required (https://nodejs.or
 
 [ -d .venv ] || "$PY" -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-if [ "$(uname)" = "Linux" ]; then
-  # CPU-only PyTorch (~200 MB) instead of the default CUDA build (~3-5 GB).
-  .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    || { echo "CPU wheel index unreachable; falling back to PyPI torch (large download)"; .venv/bin/pip install torch torchvision; }
-else
-  .venv/bin/pip install torch torchvision   # macOS wheels are CPU/MPS already
-fi
 .venv/bin/pip install -r requirements.txt
 (cd bergamot_host && npm ci --no-audit --no-fund)
 .venv/bin/python scripts/download_models.py "$@"

@@ -11,12 +11,11 @@ dependencies = [
   "pillow>=10.1",
   "rapidocr>=3.4",
   "onnxruntime>=1.17",
-  "easyocr>=1.7.1",
-  "torch>=2.1",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-aiohttp>=1.0"]
+torch = ["torch>=2.1", "easyocr>=1.7.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

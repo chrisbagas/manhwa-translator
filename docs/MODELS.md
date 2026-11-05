@@ -1,5 +1,20 @@
 # Models, licences and hardware
 
+> **v0.2 summary:** the default Korean recogniser is EasyOCR's korean_g2, **exported to ONNX** (`service/scripts/export_recognizer_onnx.py`; max logit difference to PyTorch 1.2e-4). It is used by both engines, so PyTorch is no longer required. The exported file is committed at `extension/assets/models/rec/korean_g2.onnx` (16 MB, Apache-2.0 weights, SHA-256 `0a28c6f6…4e09`).
+>
+> **Important finding from real pages:** korean_g2's character table contains only **913 Hangul syllables**. Very common ones are missing: 었, 았, 봐, 뭘, 됩. The model *cannot* output them; this explains most remaining OCR errors. The full-Hangul `korean_PP-OCRv5_rec_mobile` is supported by both engines (`--ppocr-korean`). In the extension it is preferred automatically **if** it reads a bundled Korean test line ("뭘 봐? 살아 있었습니다! 단축됩니다") with ≤25% character error; otherwise the engine falls back and reports why. The PaddleOCR code path was verified identical to RapidOCR on six English lines with PP-OCRv6; the Korean model itself could not be downloaded in my environment.
+>
+> **Extension size:** about 97 MB unpacked:
+>
+> | Part | Size |
+> |---|---|
+> | ONNX Runtime WASM | 15 MB |
+> | Detector | 10 MB |
+> | Recogniser | 16 MB |
+> | Bergamot engine | 5 MB |
+> | Translation model | 54 MB |
+
+
 Everything runs locally on CPU. A GPU is not needed.
 
 ## Models in use

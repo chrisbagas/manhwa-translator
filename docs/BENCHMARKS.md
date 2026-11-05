@@ -5,6 +5,48 @@ All numbers come from one run on the hardware below (2026-11-05). They are measu
 **Hardware**: cloud VM, Intel Xeon @ 2.10 GHz, 4 threads, 15 GB RAM, no GPU, Linux x86-64. Python 3.13.18, Node 22.23, Chromium 147 (Playwright build).
 **Models**: PP-OCRv6 small detector, EasyOCR korean_g2, Bergamot ko-en base-memory.
 
+## Built-in engine (v0.2)
+
+**Accuracy vs. the Python reference.** The TypeScript engine was run in Node on the generated fixtures with ONNX Runtime Web (WASM, the same backend as the browser), using `test/engine/analyze-node.ts` + `test/engine/score.py`. Every region count matches ground truth (21/21). Overall OCR character error rate:
+
+| Engine | Overall OCR CER |
+|---|---|
+| TypeScript, built-in | **8.8%** |
+| Python service, ONNX recogniser | 8.3% |
+| Python service, PyTorch EasyOCR | 9.8% |
+
+The browser produced results identical to Node on the tall strip.
+
+**Speed (same 4-thread Xeon):**
+
+| Page | 1 thread | 4 threads |
+|---|---|---|
+| 720×1400 page | 1.4–1.8 s | 0.5–0.8 s |
+| 800×2000, 5 bubbles | 4.3 s | 1.7 s |
+| 720×9000 strip | 12.6 s | 4.5 s |
+
+Model load is 0.3–1 s, and the Node process RSS is ~0.6 GB.
+
+**In Chromium (`test/e2e/run-builtin.mjs`, no service running, 8/8 checks).** Cross-origin isolated, 3 inference threads. Engine load (including the recogniser self-test) took 0.6–1.0 s.
+
+| Run | Time |
+|---|---|
+| 6-page chapter | 6.2–8.2 s, including first-use load |
+| 5 images with a 9,000 px strip | 9.9–12.0 s |
+| Same 5 images again (IndexedDB cache) | **0.3 s** |
+| Your two pages | 1.6–1.8 s |
+
+**Your pages** (`samples/user/`, local only, not committed):
+
+| Page | Korean read | Notes |
+|---|---|---|
+| page 2 | "마 사범님, 아직 마수가 살아 있습니다!" | read exactly (one run lost the comma). Translation: "Mr. Ma, the horse is still alive!"; the model's vocabulary error (마수 → horse) is fixable with the glossary. |
+| page 1 | "'액티브 스길 : 급속 발화 Lv.1' 필요 마나 300 1분간 화염 스길의 시전 시간이 30% 단축되니다." | 스킬→스길 and 됩→되 errors come from korean_g2's missing syllables. The huge stylised SFX (화르륵) and the outlined 콰앙 on page 2 were **not detected**. |
+
+**Recogniser self-test in the browser.** With a PaddleOCR model that cannot read Hangul registered as the preferred candidate, the engine measured 100% character error on the Korean test line, rejected it, and fell back to korean_g2 (which scores 25% on that line because 었/봐/뭘/됩 are missing).
+
+**Paddle code path.** On six English lines with PP-OCRv6, the TypeScript recogniser produced output identical to RapidOCR's Python reference (6/6).
+
 ## Service: `scripts/benchmark.py --huge`
 
 Model load and warm-up: 3.7 s. RSS after load: 767 MB.
@@ -79,10 +121,16 @@ Model load and warm-up: 3.7 s. RSS after load: 767 MB.
 - Changing the SFX mode re-renders using cached OCR.
 - Service unavailable: guidance is shown and no image is fetched or sent.
 
+### Built-in engine tests
+
+- `npm test` includes 21 engine unit tests: morphology, components, detector post-processing, CTC decoding, tiling re-detection, grouping, render-box separation, translation stage, and the readable-colour guard.
+- `node test/e2e/run-builtin.mjs` runs the built-in engine in Chromium.
+
 ### Not tested
 
 - **Firefox, at runtime.** No Firefox binary could be installed in this environment. The Firefox build passes `web-ext lint` with 0 errors and 0 warnings, and shares all code with the Chrome build. Its background runs as an event page instead of a service worker. Firefox-specific behaviour is therefore unverified, notably DNR Referer rules, `permissions.request` and fonts.
 - **Real manhwa sites and real scans.** Only generated fixtures and local test pages were used.
 - **Windows, macOS and Apple Silicon.**
 - **Android.** Everything in `docs/ANDROID.md` is an untested assumption.
-- **The optional PP-OCRv5 Korean recogniser.** Its download hosts were blocked here, so it was never run.
+- **The optional PP-OCRv5 Korean recogniser.** Its download hosts were blocked here, so it was never run on Korean (its code path is verified with PP-OCRv6).
+- **The built-in engine in Firefox** (single-threaded there; lint only).

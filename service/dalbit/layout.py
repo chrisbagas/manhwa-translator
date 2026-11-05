@@ -19,7 +19,7 @@ from PIL import Image
 
 from .types import Bubble, Region, Style, TextLine
 
-ANALYSIS_VERSION = "layout-4"
+ANALYSIS_VERSION = "layout-5"
 
 HANGUL = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏]")
 KANA = re.compile(r"[぀-ヿ]")
@@ -345,7 +345,13 @@ def estimate_style(img: np.ndarray, lines: list[TextLine], bg_hint: np.ndarray |
         return style
     gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
     if bg_hint is not None:
-        ink = np.abs(sub.astype(np.int16) - bg_hint.astype(np.int16)).max(axis=2) >= 40
+        diff = np.abs(sub.astype(np.int16) - bg_hint.astype(np.int16)).max(axis=2)
+        cand = diff >= 40
+        lum_px = sub[..., 0] * 0.299 + sub[..., 1] * 0.587 + sub[..., 2] * 0.114
+        bg_l = _lum(bg_hint)
+        lighter = cand & (lum_px > bg_l)
+        # Keep the dominant contrast direction only (textured boxes contain both).
+        ink = lighter if lighter.sum() >= (cand & ~lighter).sum() else cand & ~lighter
     else:
         _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         # Minority class = ink.
@@ -355,6 +361,10 @@ def estimate_style(img: np.ndarray, lines: list[TextLine], bg_hint: np.ndarray |
     # Text colour: the "core" of the strokes (eroded ink) to skip outlines.
     core = cv2.erode(ink.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     src = core if core.sum() > 20 else ink
+    if bg_hint is not None:
+        d = np.abs(sub.astype(np.int16) - bg_hint.astype(np.int16)).max(axis=2)
+        strong = src & (d >= np.median(d[src]))
+        src = strong if strong.any() else src
     fg = np.median(sub[src], axis=0)
     style.fg = _hex(fg)
     # Outline: pixels just outside the core that differ from both fg and bg.
@@ -362,7 +372,8 @@ def estimate_style(img: np.ndarray, lines: list[TextLine], bg_hint: np.ndarray |
     if ring.sum() > 20:
         rc = np.median(sub[ring], axis=0)
         bgc = bg_hint if bg_hint is not None else np.median(sub[~ink], axis=0) if (~ink).any() else rc
-        if np.abs(rc - fg).max() > 60 and np.abs(rc - bgc).max() > 40:
+        blend = np.abs(rc - (fg + bgc) / 2).max()  # halfway colour = anti-aliasing, not an outline
+        if np.abs(rc - fg).max() > 60 and np.abs(rc - bgc).max() > 40 and blend > 40:
             style.outline = _hex(rc)
             style.outline_px = round(max(1.0, lh * 0.06), 1)
     # Weight from stroke thickness (distance transform of the ink mask).

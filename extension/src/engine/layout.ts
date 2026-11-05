@@ -274,7 +274,17 @@ export function estimateStyle(r: Raster, lines: TextLine[], bgHint: number[] | n
   const N = sub.w * sub.h;
   const ink: Mask = { w: sub.w, h: sub.h, data: new Uint8Array(N) };
   if (bgHint) {
-    for (let i = 0; i < N; i++) ink.data[i] = maxDiff(sub.data, i, bgHint) >= 40 ? 1 : 0;
+    // Keep only the dominant contrast direction (light-on-dark or dark-on-light):
+    // textured boxes also contain pixels that differ the other way.
+    const bgL = lum(bgHint[0], bgHint[1], bgHint[2]);
+    let lighter = 0, darker = 0;
+    const L0 = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      L0[i] = lum(sub.data[i * 4], sub.data[i * 4 + 1], sub.data[i * 4 + 2]);
+      if (maxDiff(sub.data, i, bgHint) >= 40) { if (L0[i] > bgL) lighter++; else darker++; }
+    }
+    const wantLighter = lighter >= darker;
+    for (let i = 0; i < N; i++) ink.data[i] = maxDiff(sub.data, i, bgHint) >= 40 && (L0[i] > bgL) === wantLighter ? 1 : 0;
   } else {
     const g = toGray(sub);
     const t = otsu(g);
@@ -290,7 +300,12 @@ export function estimateStyle(r: Raster, lines: TextLine[], bgHint: number[] | n
   let coreN = 0;
   for (const v of core.data) coreN += v;
   const src = coreN > 20 ? core : ink;
-  const fg = medianColor(sub, (i) => !!src.data[i])!;
+  // Strongest-contrast half of the stroke pixels (anti-aliased edges pull the median toward the background).
+  const dists: number[] = [];
+  for (let i = 0; i < N; i++) if (src.data[i]) dists.push(bgHint ? maxDiff(sub.data, i, bgHint) : 0);
+  dists.sort((a, b) => a - b);
+  const cut = bgHint ? dists[Math.floor(dists.length / 2)] : -1;
+  const fg = medianColor(sub, (i) => !!src.data[i] && (!bgHint || maxDiff(sub.data, i, bgHint) >= cut))!;
   style.fg = hex(fg);
   const ringM = dilate(src, 2);
   const ringSel = (i: number) => !!ringM.data[i] && !src.data[i];
@@ -299,7 +314,9 @@ export function estimateStyle(r: Raster, lines: TextLine[], bgHint: number[] | n
   if (ringN > 20) {
     const rc = medianColor(sub, ringSel)!;
     const bgc = bgHint ?? medianColor(sub, (i) => !ink.data[i]) ?? rc;
-    if (Math.max(...rc.map((v, k) => Math.abs(v - fg[k]))) > 60 && Math.max(...rc.map((v, k) => Math.abs(v - bgc[k]))) > 40) {
+    // A ring halfway between text and background is anti-aliasing, not an outline.
+    const blend = Math.max(...rc.map((v, k) => Math.abs(v - (fg[k] + bgc[k]) / 2)));
+    if (Math.max(...rc.map((v, k) => Math.abs(v - fg[k]))) > 60 && Math.max(...rc.map((v, k) => Math.abs(v - bgc[k]))) > 40 && blend > 40) {
       style.outline = hex(rc);
       style.outline_px = Math.round(Math.max(1, lh * 0.06) * 10) / 10;
     }

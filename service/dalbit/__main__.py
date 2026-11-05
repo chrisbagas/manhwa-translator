@@ -52,7 +52,7 @@ def _cmd_doctor(args, cfg: Config) -> int:
     ok = True
     print(f"models dir: {cfg.models_dir}")
     checks = {
-        "EasyOCR korean_g2": cfg.models_dir / "easyocr" / "korean_g2.pth",
+        "Korean recogniser (ONNX)": cfg.models_dir / "onnx" / "korean_g2.onnx",
         "Bergamot ko->en model": cfg.models_dir / "bergamot" / "koen" / "model.koen.intgemm.alphas.bin",
         "Bergamot host deps": Path(__file__).resolve().parents[1] / "bergamot_host" / "node_modules" / "@browsermt" / "bergamot-translator",
         "(optional) PP-OCRv5 Korean": cfg.models_dir / "ppocr" / "korean_PP-OCRv5_rec_mobile.onnx",

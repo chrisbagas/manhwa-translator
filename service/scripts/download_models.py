@@ -138,15 +138,41 @@ def ppocr_korean() -> None:
     print("  PP-OCRv5 Korean ready; enable with DALBIT_RECOGNIZER=ppocr-korean")
 
 
+ONNX_REC = {
+    # EasyOCR korean_g2 exported to ONNX by scripts/export_recognizer_onnx.py and
+    # committed in extension/assets/models/rec (same Apache-2.0 weights).
+    "dir": ROOT.parent / "extension" / "assets" / "models" / "rec",
+    "sha256": "0a28c6f65f279a1aa8c894c9d435586e7423f36213acdc1ef38ebbd4a63b4e09",
+}
+
+
+def onnx_recognizer() -> None:
+    dest = MODELS / "onnx"
+    dest.mkdir(parents=True, exist_ok=True)
+    src = ONNX_REC["dir"] / "korean_g2.onnx"
+    if not src.exists():
+        sys.exit(f"{src} missing (it is part of the repository)")
+    data = src.read_bytes()
+    check(data, ONNX_REC["sha256"], "korean_g2.onnx")
+    (dest / "korean_g2.onnx").write_bytes(data)
+    shutil.copyfile(ONNX_REC["dir"] / "korean_g2.json", dest / "korean_g2.json")
+    print("  ONNX korean_g2 recogniser ready (16 MB, no PyTorch needed)")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ppocr-korean", action="store_true", help="also fetch the optional PaddleOCR Korean recogniser")
     ap.add_argument("--pivot", action="append", default=[], help="extra target language via English, e.g. --pivot es")
     ap.add_argument("--skip-required", action="store_true")
+    ap.add_argument("--easyocr-torch", action="store_true", help="also fetch the original PyTorch weights (needs torch + easyocr)")
     args = ap.parse_args()
     if not args.skip_required:
-        print("EasyOCR Korean recogniser (Apache-2.0)")
+        print("Korean recogniser, ONNX (Apache-2.0)")
+        onnx_recognizer()
+    if args.easyocr_torch:
+        print("EasyOCR Korean recogniser, PyTorch (Apache-2.0)")
         easyocr()
+    if not args.skip_required:
         print("Mozilla Bergamot ko->en (MPL-2.0)")
         bergamot_pair("koen", BERGAMOT["koen"])
     if args.ppocr_korean:

@@ -1,5 +1,28 @@
 # Architecture
 
+> **Update (v0.2):** the pipeline now also runs **entirely inside the extension** (the "built-in" engine, now the default). The original decision record follows; the built-in engine is described in the next section.
+
+## Built-in engine (v0.2)
+
+```
+content script ──msg──► background ──► [Chrome] offscreen document   │ [Firefox] background page
+                                              EngineHost: queue, IndexedDB cache, image fetch
+                                              ├─ engine-ocr.js  (module Web Worker)
+                                              │    ONNX Runtime Web (WASM SIMD, 3–4 threads when cross-origin isolated)
+                                              │    PP-OCRv6 detector → TS port of DB post-processing
+                                              │    recogniser (korean_g2 ONNX, or PaddleOCR family) + load-time Korean self-test
+                                              │    tiling, bubbles, grouping, cleanup masks, styles, SFX placement (TS port)
+                                              └─ bergamot/translator-worker.js (classic Web Worker, Mozilla Bergamot WASM)
+```
+
+- **Same algorithms as the Python reference**, ported to TypeScript in `extension/src/engine/`. A Node harness (`test/engine/analyze-node.ts`) runs the browser engine on the same fixtures. Its character error rate matches the Python service, and its region counts and classifications are identical; see BENCHMARKS.md.
+- **Why the offscreen document (Chrome).** MV3 service workers cannot start Web Workers, so a hidden offscreen document hosts them. Firefox's MV3 background is a page and hosts them directly; Chrome-only code is compiled out of the Firefox build.
+- **Threads.** Chrome manifest keys `cross_origin_embedder_policy: require-corp` and `cross_origin_opener_policy: same-origin` make extension pages cross-origin isolated, so ONNX Runtime can use SharedArrayBuffer threads. Image fetching still works because the extension's host permissions make the fetch a CORS request, and the e2e test verifies it against a hotlink-protected CDN.
+- **Images are never put on one giant canvas.** `ImageBitmap` plus a small reusable `OffscreenCanvas` copy out only the tile, crop or analysis window needed.
+- **No network at run time.** The models are packaged files of the extension. The CSP adds only `'wasm-unsafe-eval'`. Bergamot's Node.js shim, which contains `eval`, is stripped at build time.
+- **Cache.** IndexedDB, with keys mirroring the service (analysis vs. translation settings). A revisit of an already translated page took 0.3 s instead of 10 s in the e2e run.
+
+
 ## Decision: thin extension + local service
 
 | | 1. Fully in-browser inference | 2. Extension + local service (chosen) |

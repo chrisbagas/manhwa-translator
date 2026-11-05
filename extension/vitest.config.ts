@@ -1,2 +1,2 @@
 import { defineConfig } from 'vitest/config';
-export default defineConfig({ test: { include: ['test/unit/**/*.test.ts'], environment: 'jsdom' } });
+export default defineConfig({ define: { __TARGET__: '"chrome"' }, test: { include: ['test/unit/**/*.test.ts'], environment: 'jsdom' } });
