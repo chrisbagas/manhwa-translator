@@ -56,3 +56,12 @@ def test_bergamot_korean_dialogue_real_model():
         assert t.version("ko", "en").startswith("bergamot[koen:")
     finally:
         t.close()
+
+
+def test_structured_windows_line_by_line():
+    from dalbit.translate import structure as st
+
+    assert st.is_structured("narration", ["그림자 아이템 : 가봇 Lv.11", "창조 등급: 영웅", "종류: 방어구(몸통)", "스탯 구현률 21%", "방어력 +120"], "left")
+    assert not st.is_structured("dialogue", ["마 사범님,", "아직 마수가", "살아 있습니다!"], "center")
+    assert st.units(["필요 마나 300", "1분간 화염 스킬의", "시전 시간이 30% 단축됩니다."]) == [[0], [1, 2]]
+    assert st.split_across("Reduces the cast time of fire skills by 30% for 1 minute.", 2) == ["Reduces the cast time of fire", "skills by 30% for 1 minute."]

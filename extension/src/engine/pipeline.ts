@@ -8,12 +8,13 @@ import { orderQuad, warpQuad, type Pt, type RGBA } from './imgops';
 import * as L from './layout';
 import type { Raster } from './raster';
 import type { Recognizer } from './recognize';
-import { applyGlossary, looksLikeSfx, romanize, scriptOk, sfxLookup, splitSentences } from './text';
+import { applyGlossary, continuesOnNextLine, looksLikeSfx, romanize, scriptOk, sfxLookup, splitAcross, splitSentences, SYSTEM_TERMS_KO } from './text';
 import { DEFAULT_TILES, detectTiled, type TileConfig } from './tiling';
 
-export const ENGINE_VERSION = 'e2';
+export const ENGINE_VERSION = 'e5';
 export const RTL_SOURCES = new Set(['ja']);
 const SFX_MIN_CONF = 0.6;
+export const MIN_LINE_CONTRAST = 90; // luminance p95-p5 inside a line box
 
 export class Cancelled extends Error {
   constructor() { super('cancelled'); }
@@ -97,7 +98,7 @@ export async function analyze(r: Raster, src: string, deps: AnalyzeDeps): Promis
     const xs = c.quad.map((p) => p[0]), ys = c.quad.map((p) => p[1]);
     if (Math.max(...ys) - Math.min(...ys) < 8 || Math.max(...xs) - Math.min(...xs) < 6) continue;
     deps.checkCancel();
-    const res = await deps.recognizer.recognize(cropQuad(r, c.quad));
+    const res = await deps.recognizer.recognize(L.trimFaint(cropQuad(r, c.quad), MIN_LINE_CONTRAST));
     const text = res.text.replace(/\s+/g, ' ').trim();
     if (!text) continue;
     const quad = orderQuad(c.quad).map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10] as Pt);
@@ -116,8 +117,18 @@ export async function analyze(r: Raster, src: string, deps: AnalyzeDeps): Promis
   }
   timings.recognize = Math.round(now() - t0);
 
+  // Faint lettering (site watermarks, background text): drop, but report.
+  const faint: Analysis['discarded'] = [];
+  const kept = lines.filter((ln) => {
+    const c = L.lineContrast(r, ln);
+    if (c >= MIN_LINE_CONTRAST) return true;
+    const b = L.lineBox(ln);
+    faint.push({ bbox: [Math.floor(b[0]), Math.floor(b[1]), Math.round(b[2] - b[0]), Math.round(b[3] - b[1])], text: ln.text, confidence: ln.confidence, reason: 'low-contrast (watermark?)' });
+    return false;
+  });
   t0 = now();
-  const { regions, discarded } = await layoutPage(r, src, lines, deps);
+  const { regions, discarded } = await layoutPage(r, src, kept, deps);
+  discarded.push(...faint);
   timings.layout = Math.round(now() - t0);
   return { width: r.width, height: r.height, tiling: stats, regions, discarded, timingsMs: timings };
 }
@@ -174,7 +185,9 @@ async function layoutPage(r: Raster, src: string, lines: L.TextLine[], deps: Ana
       style, bubble: info ? info.bubble : null, patch: null, patch_box: null,
       render_box: [0, 0, 0, 0], render_mode: 'overlay', flags,
     };
-    if ((kind === 'dialogue' || kind === 'narration') && info) {
+    const covered = info ? Math.min(...boxes.map((b) => L.coverage(info, b))) : 0;
+    if (info && covered < 0.8) region.flags.push('partly-on-artwork');
+    if ((kind === 'dialogue' || kind === 'narration') && info && covered >= 0.8) {
       const p = L.cleanupPatch(r, info, boxes, lh);
       if (p) {
         region.patch = await deps.encodePng(p.rgba);
@@ -230,7 +243,9 @@ export async function translateSegments(texts: string[], translate: TranslateFn)
 
 export async function translateRegions(regions: Region[], src: string, glossary: Record<string, string>, sfxMode: SfxMode, translate: TranslateFn): Promise<Region[]> {
   const out = regions.map((r) => ({ ...r, flags: [...r.flags] }));
-  const idx: number[] = [], texts: string[] = [];
+  const idx: number[] = [], texts: string[] = [], lineNo: number[] = [];
+  const unitsOf = new Map<number, number[][]>();
+  const src_ = src;
   out.forEach((r, i) => {
     r.translation_note = '';
     if (r.kind === 'sfx') {
@@ -243,19 +258,67 @@ export async function translateRegions(regions: Region[], src: string, glossary:
       if (r.confidence < SFX_MIN_CONF) r.flags = [...new Set([...r.flags, 'uncertain-reading'])];
       return;
     }
-    const g = applyGlossary(r.source_text, glossary);
-    if (g.used.length) r.translation_note = 'glossary';
-    idx.push(i);
-    texts.push(g.text);
+    // Stat sheets / item windows / lists: one translated line per source line.
+    const lineMode = isStructured(r);
+    r.layout = lineMode ? 'lines' : 'paragraph';
+    // Units: a sentence that continues over several lines is translated as one.
+    const units: number[][] = [];
+    if (lineMode) {
+      r.lines.forEach((l, k) => {
+        const prev = units[units.length - 1];
+        if (prev && continuesOnNextLine(r.lines[prev[prev.length - 1]].text)) prev.push(k); else units.push([k]);
+      });
+    } else units.push(r.lines.map((_, k) => k));
+    unitsOf.set(i, units);
+    units.forEach((u) => {
+      const src = lineMode ? u.map((k) => r.lines[k].text).join(' ') : r.source_text;
+      // User glossary wins; system-window terms only apply in structured windows.
+      const g = applyGlossary(src, lineMode && src_ === 'ko' ? { ...SYSTEM_TERMS_KO, ...glossary } : glossary);
+      if (g.used.some((t) => t in glossary)) r.translation_note = 'glossary';
+      idx.push(i);
+      texts.push(g.text);
+      lineNo.push(u[0]);
+    });
   });
-  const tr = await translateSegments(texts, translate);
-  tr.forEach((t, k) => {
-    const r = out[idx[k]];
+  const raw = await translateSegments(texts, translate);
+  // Re-join per-line translations of list-like regions with hard line breaks.
+  const joined = new Map<number, string[]>();
+  raw.forEach((t, k) => joined.set(idx[k], [...(joined.get(idx[k]) ?? []), t]));
+  [...joined.entries()].forEach(([i, unitTexts]) => {
+    const r = out[i];
+    let parts = unitTexts;
+    if (r.layout === 'lines') {
+      const per: string[] = r.lines.map(() => '');
+      (unitsOf.get(i) ?? []).forEach((u, n) => {
+        const pieces = splitAcross((parts[n] ?? '').trim(), u.length);
+        u.forEach((k, j) => (per[k] = pieces[j] ?? ''));
+      });
+      r.lines = r.lines.map((l, k) => ({ ...l, translated_text: per[k] }));
+      parts = per;
+    }
+    let t = parts.map((p) => p.trim()).filter(Boolean).join('\n');
     if (scriptOk(t, src) && src !== 'en') { r.flags = [...new Set([...r.flags, 'untranslated'])]; t = ''; }
     r.translated_text = t;
     if (!t) { r.translation_note = 'untranslated'; if (r.render_mode === 'annotate') r.render_mode = 'marker' as RenderMode; }
   });
   return out;
+}
+
+const ITEM_LINE = /\d|[:：%+\-−\[\]()（）【】<>·•]/;
+
+/** Item windows, stat sheets, menus: lines are independent items, not one sentence. */
+export function isStructured(r: Pick<Region, 'kind' | 'lines' | 'style'>): boolean {
+  const texts = r.lines.map((l) => l.text);
+  if (texts.length < 2 || r.kind === 'sfx') return false;
+  if (isListLike(texts)) return true;
+  if (r.kind === 'dialogue' && r.style?.align !== 'left') return false; // speech bubbles flow as sentences
+  const items = texts.filter((t) => ITEM_LINE.test(t) || [...t.replace(/\s/g, '')].length <= 6).length;
+  return items >= Math.ceil(texts.length / 2);
+}
+
+/** Short items or items with numbers on every line (stat sheets, menus, lists). */
+export function isListLike(lines: string[]): boolean {
+  return lines.length > 1 && lines.every((l) => /\d/.test(l) || [...l.replace(/\s/g, '')].length <= 4);
 }
 
 export type { Kind };

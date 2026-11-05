@@ -21,14 +21,15 @@ from .ocr.base import crop_quad, quad_angle
 from .tiling import TileConfig, detect_tiled
 from .translate import glossary as gloss
 from .translate import sfx as sfxlex
+from .translate import structure
 from .translate.base import TranslationUnavailable
 from .translate.romanize import romanize
 from .types import Region, TextLine
 
 log = logging.getLogger("dalbit")
 
-PIPELINE_VERSION = "p8"
-TRANSLATE_VERSION = "t4"
+PIPELINE_VERSION = "p9"
+TRANSLATE_VERSION = "t6"
 SUPPORTED_SOURCES = ("ko",)  # interfaces are language-agnostic; see docs/ARCHITECTURE.md
 RTL_SOURCES = {"ja"}
 SFX_MODES = ("annotate", "original", "replace")
@@ -37,6 +38,9 @@ SFX_MIN_CONF = 0.6
 
 class Cancelled(Exception):
     pass
+
+
+is_list_like = structure.is_list_like
 
 
 _SENT_END = re.compile(r"[.!?…~♡♥]+[\"'”’」』)]*(?=\s)")
@@ -135,7 +139,7 @@ class Engine:
         for i in range(0, len(cands), batch):
             check_cancel()
             chunk = cands[i:i + batch]
-            crops = [crop_quad(img, c.quad) for c in chunk]
+            crops = [layout.trim_faint(crop_quad(img, c.quad)) for c in chunk]
             for c, (text, conf) in zip(chunk, self.recognizer.recognize(crops)):
                 text = re.sub(r"\s+", " ", text).strip()
                 if not text:
@@ -149,6 +153,15 @@ class Engine:
 
         t0 = time.perf_counter()
         self._discarded = []
+        kept = []
+        for ln in lines:  # faint lettering (site watermarks): drop, but report
+            if layout.line_contrast(img, ln) >= layout.MIN_LINE_CONTRAST:
+                kept.append(ln)
+            else:
+                x0, y0, x1, y1 = ln.bbox
+                self._discarded.append({"bbox": [int(x0), int(y0), int(x1 - x0), int(y1 - y0)], "text": ln.text,
+                                        "confidence": ln.confidence, "reason": "low-contrast (watermark?)"})
+        lines = kept
         regions = self._layout(img, sha, src, lines, check_cancel)
         timings["layout"] = round((time.perf_counter() - t0) * 1000, 1)
         return {"width": w, "height": h, "tiling": tstats, "regions": [r.to_json() for r in regions],
@@ -225,7 +238,10 @@ class Engine:
                 angle=round(angle, 1), lines=g, source_text=text, confidence=round(conf, 3),
                 style=style, bubble=info.bubble if info is not None else None, flags=flags,
             )
-            if kind in ("dialogue", "narration") and info is not None:
+            covered = min(layout.coverage(info, b) for b in boxes) if info is not None else 0.0
+            if info is not None and covered < 0.8:
+                region.flags.append("partly-on-artwork")
+            if kind in ("dialogue", "narration") and info is not None and covered >= 0.8:
                 patch = layout.cleanup_patch(img, info, boxes, lh)
                 if patch is not None:
                     region.patch, region.patch_box = patch
@@ -280,6 +296,7 @@ class Engine:
     # ---------------------------------------------------------------- translation
     def translate_regions(self, regions: list[dict], src: str, tgt: str, glossary: dict[str, str], sfx_mode: str) -> None:
         nmt_idx, nmt_texts = [], []
+        units_of: dict[int, list[list[int]]] = {}
         for i, r in enumerate(regions):
             r["translationNote"] = ""
             text = r["source_text"]
@@ -303,16 +320,34 @@ class Engine:
                 if r["confidence"] < SFX_MIN_CONF:
                     r["flags"] = sorted(set(r["flags"]) | {"uncertain-reading"})
                 continue
-            g_text, used = gloss.apply(text, glossary)
-            if used:
-                r["translation_note"] = "glossary"
-            nmt_idx.append(i)
-            nmt_texts.append(g_text)
+            line_texts = [ln["text"] for ln in r.get("lines", [])]
+            line_mode = structure.is_structured(r["kind"], line_texts, (r.get("style") or {}).get("align", "center"))
+            r["layout"] = "lines" if line_mode else "paragraph"
+            us = structure.units(line_texts) if line_mode else [list(range(len(line_texts)))]
+            units_of[i] = us
+            for u in us:
+                part = " ".join(line_texts[k] for k in u) if line_mode else text
+                terms = {**structure.SYSTEM_TERMS_KO, **glossary} if line_mode and src == "ko" else glossary
+                g_text, used = gloss.apply(part, terms)
+                if any(t in glossary for t in used):
+                    r["translation_note"] = "glossary"
+                nmt_idx.append(i)
+                nmt_texts.append(g_text)
         if nmt_texts:
-            out = self._translate_segments(nmt_texts, src, tgt)
-            for i, t in zip(nmt_idx, out):
+            raw = self._translate_segments(nmt_texts, src, tgt)
+            grouped: dict[int, list[str]] = {}
+            for i, t in zip(nmt_idx, raw):
+                grouped.setdefault(i, []).append(t.strip())
+            for i, parts_out in grouped.items():
                 r = regions[i]
-                t = t.strip()
+                if r.get("layout") == "lines":
+                    per = [""] * len(r["lines"])
+                    for u, unit_text in zip(units_of[i], parts_out):
+                        for k, piece in zip(u, structure.split_across(unit_text, len(u))):
+                            per[k] = piece
+                    r["lines"] = [{**ln, "translated_text": per[k]} for k, ln in enumerate(r["lines"])]
+                    parts_out = per
+                t = "\n".join(p for p in parts_out if p)
                 if r["kind"] == "sfx":
                     t = t.upper().rstrip(".")
                 if layout.script_ok(t, src) and src != "en":
@@ -401,7 +436,7 @@ class Engine:
         if sfx_mode == "replace":
             warnings.append("Experimental SFX replacement is not available yet; showing annotations instead.")
         if analysis.get("discarded"):
-            warnings.append(f"{len(analysis['discarded'])} unreadable detection(s) on artwork were not shown (see 'discarded').")
+            warnings.append(f"{len(analysis['discarded'])} unreadable or faint detection(s) (artwork, watermarks) were not shown (see 'discarded').")
         if not regions:
             warnings.append("No text was detected in this image.")
         result = {

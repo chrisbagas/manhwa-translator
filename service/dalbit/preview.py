@@ -23,6 +23,8 @@ MIN_PX = 11
 
 
 def wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: float) -> list[str]:
+    if "\n" in text:
+        return [l for part in text.split("\n") for l in wrap(draw, part, font, max_w)]
     words = text.split()
     lines: list[str] = []
     cur = ""
@@ -66,6 +68,21 @@ def render(image_path: Path, result: dict, out_path: Path, text_scale: float = 1
         x, y, w, h = r["render_box"]
         font_path = FONTS.get(r["kind"], FONTS["dialogue"])
         style = r.get("style") or {}
+        if mode in ("replace", "overlay") and r.get("layout") == "lines":
+            texts = [ln.get("translated_text", "") for ln in r["lines"]]
+            heights = [ln["bbox"][3] - ln["bbox"][1] for ln in r["lines"]]
+            size = int(max(MIN_PX, min(heights) * 0.8))
+            font = ImageFont.truetype(str(FONTS["narration"]), size)
+            fg = style.get("fg", "#111111") if mode == "replace" else "#111111"
+            for ln, t in zip(r["lines"], texts):
+                if not t:
+                    continue
+                x0, y0, x1, y1 = ln["bbox"]
+                if mode == "overlay":
+                    tw = draw.textlength(t, font=font)
+                    draw.rounded_rectangle([x0, y0, x0 + tw + 8, y1], radius=5, fill=(255, 255, 255, 225))
+                draw.text((x0 + 4, (y0 + y1) / 2), t, font=font, fill=fg, anchor="lm")
+            continue
         if mode in ("replace", "overlay"):
             pad = max(2, int(h * 0.06))
             start = max(MIN_PX, style.get("font_px", 24) * 1.05 * text_scale)

@@ -19,7 +19,7 @@ from PIL import Image
 
 from .types import Bubble, Region, Style, TextLine
 
-ANALYSIS_VERSION = "layout-5"
+ANALYSIS_VERSION = "layout-6"
 
 HANGUL = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏]")
 KANA = re.compile(r"[぀-ヿ]")
@@ -163,6 +163,52 @@ def reading_order(boxes: list[tuple[float, float, float, float]], rtl: bool) -> 
         band.sort(key=lambda j: (boxes[j][0] + boxes[j][2]) / 2, reverse=rtl)
         order.extend(band)
     return order
+
+
+# ---------------------------------------------------------------- faint text (watermarks)
+
+MIN_LINE_CONTRAST = 90  # p95 of max-channel difference from the line's median colour
+
+
+def ink_contrast(sub: np.ndarray) -> float:
+    bg = np.median(sub.reshape(-1, 3), axis=0)
+    d = np.abs(sub.astype(np.int16) - bg.astype(np.int16)).max(axis=2)
+    return float(np.percentile(d, 95))
+
+
+def line_contrast(img: np.ndarray, line: TextLine) -> float:
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = _clip_box(*line.bbox, w, h)
+    sub = img[y0:max(y0 + 1, y1), x0:max(x0 + 1, x1)]
+    return ink_contrast(sub)
+
+
+def trim_faint(crop: np.ndarray, min_diff: float = MIN_LINE_CONTRAST) -> np.ndarray:
+    """Trim faint columns (e.g. a watermark glued to a line) from both ends."""
+    bg = np.median(crop.reshape(-1, 3), axis=0)
+    strong = (np.abs(crop.astype(np.int16) - bg.astype(np.int16)).max(axis=2) >= min_diff).sum(axis=0) >= 2
+    cols = np.nonzero(strong)[0]
+    if cols.size == 0:
+        return crop
+    m = int(np.ceil(crop.shape[0] * 0.2))
+    a, b = max(0, cols[0] - m), min(crop.shape[1] - 1, cols[-1] + m)
+    return crop[:, a:b + 1]
+
+
+def coverage(info: "BubbleInfo", box) -> float:
+    x0, y0 = info.window[0], info.window[1]
+    m = info.component
+    bx0, by0, bx1, by1 = (int(v) for v in box)
+    step = max(1, (by1 - by0) // 12)
+    ys = np.arange(by0, by1, step) - y0
+    xs = np.arange(bx0, bx1, step) - x0
+    if not len(ys) or not len(xs):
+        return 0.0
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    ok = (yy >= 0) & (xx >= 0) & (yy < m.shape[0]) & (xx < m.shape[1])
+    inside = np.zeros_like(ok)
+    inside[ok] = m[yy[ok], xx[ok]]
+    return float(inside.mean())
 
 
 # ---------------------------------------------------------------- bubbles
@@ -324,8 +370,14 @@ def cleanup_patch(img: np.ndarray, info: BubbleInfo, boxes, lh: float) -> tuple[
     ys, xs = np.nonzero(mask)
     px0, py0, px1, py1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
     m = mask[py0:py1, px0:px1]
+    # Continue the surroundings into the erased glyphs (texture/gradients) rather
+    # than painting a flat blotch; ink outside the mask is never a source.
+    src = img[y0:y1, x0:x1].copy()
+    other_ink = (np.abs(sub - info.bg.astype(np.int16)).max(axis=2) >= 28) & ~mask
+    src[other_ink] = info.bg.astype(np.uint8)
+    filled_px = cv2.inpaint(src, mask.astype(np.uint8), 3, cv2.INPAINT_TELEA)
     rgba = np.zeros((py1 - py0, px1 - px0, 4), np.uint8)
-    rgba[..., :3] = info.bg.astype(np.uint8)
+    rgba[..., :3] = filled_px[py0:py1, px0:px1]
     rgba[..., 3] = np.where(m, 255, 0).astype(np.uint8)
     return _png_data_url(rgba), [int(px0 + x0), int(py0 + y0), int(px1 - px0), int(py1 - py0)]
 
@@ -511,3 +563,24 @@ def separate_render_boxes(regions) -> None:
         x0, y0 = min(x0, r.bbox[0]), min(y0, r.bbox[1])
         x1, y1 = max(x1, r.bbox[0] + r.bbox[2]), max(y1, r.bbox[1] + r.bbox[3])
         r.render_box = [int(x0), int(y0), int(x1 - x0), int(y1 - y0)]
+    # Drawing boxes must not overlap each other either: split between the texts.
+    drawn = [r for r in regions if r.render_mode not in ("marker", "hidden", "annotate")]
+    for i in range(len(drawn)):
+        for j in range(i + 1, len(drawn)):
+            a, b = drawn[i], drawn[j]
+            A = [a.render_box[0], a.render_box[1], a.render_box[0] + a.render_box[2], a.render_box[1] + a.render_box[3]]
+            B = [b.render_box[0], b.render_box[1], b.render_box[0] + b.render_box[2], b.render_box[1] + b.render_box[3]]
+            if min(A[2], B[2]) <= max(A[0], B[0]) or min(A[3], B[3]) <= max(A[1], B[1]):
+                continue
+            at = [a.bbox[0], a.bbox[1], a.bbox[0] + a.bbox[2], a.bbox[1] + a.bbox[3]]
+            bt = [b.bbox[0], b.bbox[1], b.bbox[0] + b.bbox[2], b.bbox[1] + b.bbox[3]]
+            if at[2] <= bt[0] or bt[2] <= at[0]:
+                l, rr, lt, rt = (A, B, at, bt) if at[2] <= bt[0] else (B, A, bt, at)
+                mid = (lt[2] + rt[0]) // 2
+                l[2] = max(lt[2], min(l[2], mid - 1)); rr[0] = min(rt[0], max(rr[0], mid + 1))
+            else:
+                t, bo, tt, btt = (A, B, at, bt) if at[3] <= bt[1] else (B, A, bt, at)
+                mid = (tt[3] + btt[1]) // 2
+                t[3] = max(tt[3], min(t[3], mid - 1)); bo[1] = min(btt[1], max(bo[1], mid + 1))
+            a.render_box = [int(A[0]), int(A[1]), int(A[2] - A[0]), int(A[3] - A[1])]
+            b.render_box = [int(B[0]), int(B[1]), int(B[2] - B[0]), int(B[3] - B[1])]

@@ -37,6 +37,10 @@ const site = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(`<!doctype html><meta charset=utf-8><title>Samples</title><style>body{margin:0;background:#111}.r{max-width:690px;margin:0 auto}.r img{display:block;width:100%}</style><div class=r>${userSamples.map((f) => `<img src="${CDN}/user/${f}" alt="${f}">`).join('')}</div>`);
   }
+  if (url.pathname === '/layout.html') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return res.end(`<!doctype html><meta charset=utf-8><title>Layout</title><style>body{margin:0;background:#111}.r{max-width:570px;margin:0 auto}.r img{display:block;width:100%}${url.searchParams.get('css') ?? ''}</style><div class=r><img src="${CDN}/img/site_bubbles.png"><img src="${CDN}/img/system_box.png"></div>`);
+  }
   if (url.pathname.endsWith('.html')) {
     const f = join(HERE, 'site', url.pathname);
     if (!existsSync(f)) { res.writeHead(404); return res.end(); }
@@ -145,6 +149,54 @@ try {
   await waitFor(tall, (s) => settled(s) && s.done === 5, 60000, 'tall cached');
   report.phases.tallPageCachedMs = Date.now() - t0;
   check('second visit served from the engine cache', report.phases.tallPageCachedMs < report.phases.tallPageMs / 2, `${report.phases.tallPageCachedMs} ms vs ${report.phases.tallPageMs} ms`);
+
+  // Real-site layouts (from user screenshots): touching bubbles + watermark, and an item
+  // window with label/value lines and two stat columns, under several page styles.
+  for (const [label, css] of [['plain', ''], ['zoom67', 'body{zoom:.67}'], ['scaled', '.r{transform:scale(.8);transform-origin:top center}']]) {
+    const lp = await ctx.newPage();
+    await lp.goto(`${SITE}/layout.html?css=${encodeURIComponent(css)}`);
+    await openPopupFor(lp);
+    await popup.click('#translate');
+    await waitFor(lp, (s) => settled(s) && s.done === 2, 180000, `layout ${label}`);
+    await lp.waitForTimeout(600);
+    const m = await lp.evaluate(() => [...document.querySelectorAll('dalbit-layer')].map((l) => {
+      const boxes = [...l.shadowRoot.querySelectorAll('.box')];
+      return {
+        img: l.previousElementSibling.src.split('/').pop(),
+        boxes: boxes.map((b) => {
+          const t = b.querySelector('.txt'), br = b.getBoundingClientRect(), tr = t.getBoundingClientRect();
+          return { line: b.classList.contains('line'), text: t.textContent, src: b.title, fs: t.style.fontSize,
+            inside: tr.left >= br.left - 2 && tr.right <= br.right + 2, tr: [tr.left, tr.top, tr.right, tr.bottom] };
+        }),
+      };
+    }));
+    const all = m.flatMap((x) => x.boxes);
+    check(`[${label}] every translation stays inside its box (wraps, never runs off)`, all.length > 0 && all.every((b) => b.inside), JSON.stringify(all.filter((b) => !b.inside).map((b) => b.text)));
+    const win = m.find((x) => x.img.startsWith('system_box'))?.boxes ?? [];
+    const overlaps = [];
+    for (let i = 0; i < win.length; i++) for (let j = i + 1; j < win.length; j++) {
+      const a = win[i].tr, b = win[j].tr;
+      if (Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > 1 && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > 1) overlaps.push([win[i].text, win[j].text]);
+    }
+    check(`[${label}] item window: one translated line per source line, no overlaps`, win.length === 10 && win.every((b) => b.line) && !overlaps.length, `${win.length} lines; overlaps ${JSON.stringify(overlaps)}`);
+    check(`[${label}] item window uses one font size`, new Set(win.map((b) => b.fs)).size === 1, [...new Set(win.map((b) => b.fs))].join(','));
+    check(`[${label}] site watermark is not translated`, !all.some((b) => /웹툰|뉴토끼|469/.test(b.src)));
+    const al = await lp.evaluate(() => [...document.querySelectorAll('dalbit-layer')].map((l) => {
+      const a = l.getBoundingClientRect(), b = l.previousElementSibling.getBoundingClientRect();
+      return Math.max(Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.width - b.width), Math.abs(a.height - b.height));
+    }));
+    check(`[${label}] overlays aligned with images`, al.every((d) => d <= 1.5), al.map((d) => d.toFixed(2)).join(','));
+    if (label === 'plain') {
+      await lp.evaluate(() => document.querySelector('dalbit-panel')?.remove());
+      const imgs = await lp.locator('.r > img').all();
+      for (const e of imgs) {
+        await e.scrollIntoViewIfNeeded();
+        const name = (await e.getAttribute('src')).split('/').pop().replace(/\.\w+$/, '');
+        await e.screenshot({ path: join(OUT, `builtin-${name}.png`) });
+      }
+    }
+    await lp.close();
+  }
 
   // The user's own pages.
   if (userSamples.length) {

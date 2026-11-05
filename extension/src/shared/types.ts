@@ -27,6 +27,7 @@ export interface Bubble {
 export interface Line {
   quad: number[][];
   text: string;
+  translated_text?: string; // set when the region is laid out line by line
   confidence: number;
   angle: number;
   bbox: number[];
@@ -49,6 +50,7 @@ export interface Region {
   patch_box: [number, number, number, number] | null;
   render_box: [number, number, number, number];
   render_mode: RenderMode;
+  layout?: 'paragraph' | 'lines'; // 'lines': one translated line per source line, at its position
   flags: string[];
 }
 

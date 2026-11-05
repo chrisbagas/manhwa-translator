@@ -143,12 +143,40 @@ def test_rejects_non_images(engine):
         engine.process(b"<html>not an image</html>")
 
 
-@pytest.mark.parametrize("name", [f"chapter_{i:02d}" for i in range(1, 7)])
+@pytest.mark.parametrize("name", [f"chapter_{i:02d}" for i in range(1, 7)] + ["site_bubbles"])
 def test_chapter_pages_have_no_artwork_false_positives(engine, fixtures, name):
     gt = load_gt(fixtures, name)
     res = _run(engine, fixtures, name)
     assert len(res["regions"]) == len(gt["blocks"]), [(r["source_text"], r["kind"]) for r in res["regions"]]
     for d in res.get("discarded", []):
-        assert d["reason"] == "likely-artwork"
+        assert d["reason"] in ("likely-artwork", "low-contrast (watermark?)")
     if res.get("discarded"):
         assert any("not shown" in w for w in res["warnings"]), "discarded detections must be reported"
+
+
+def test_watermark_is_not_translated_and_bubbles_stay_apart(engine, fixtures):
+    gt = load_gt(fixtures, "site_bubbles")
+    res = _run(engine, fixtures, "site_bubbles")
+    matched = match_regions(res, gt)
+    assert [len(matched[i]) for i in range(len(gt["blocks"]))] == [1, 1]
+    texts = " ".join(r["source_text"] for r in res["regions"])
+    assert "웹툰" not in texts and "뉴토끼" not in texts and "469" not in texts, texts
+    assert any(d["reason"].startswith("low-contrast") for d in res["discarded"])
+    assert any("not shown" in w for w in res["warnings"])
+
+
+def test_item_window_keeps_line_structure_and_boxes_do_not_overlap(engine, fixtures):
+    gt = load_gt(fixtures, "system_box")
+    res = _run(engine, fixtures, "system_box")
+    lines = [ln for r in res["regions"] for ln in r["lines"]]
+    assert len(lines) == len(gt["lines"]), [ln["text"] for ln in lines]
+    assert all(r.get("layout") == "lines" for r in res["regions"])
+    assert all(ln.get("translated_text") for ln in lines)
+    drawn = [r["render_box"] for r in res["regions"] if r["render_mode"] in ("replace", "overlay")]
+    for i, a in enumerate(drawn):
+        for b in drawn[i + 1:]:
+            ix = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+            iy = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+            assert ix <= 0 or iy <= 0, (a, b)
+    # System-window vocabulary is used (e.g. 방어력 -> Defense).
+    assert any("Defense" in ln["translated_text"] for ln in lines)

@@ -57,6 +57,7 @@ export function greedyWrap(words: string[], maxW: number, size: number, measure:
 
 /** Same line count as greedy, but with the narrowest width -> balanced lines. */
 export function balancedWrap(text: string, maxW: number, size: number, measure: Measure): string[] {
+  if (text.includes('\n')) return text.split('\n').flatMap((p) => balancedWrap(p, maxW, size, measure));
   const words = tokenize(text);
   if (!words.length) return [];
   const greedy = greedyWrap(words, maxW, size, measure);

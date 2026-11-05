@@ -203,6 +203,69 @@ def make_all(out: Path) -> list[str]:
             blocks.append(Block(txt, "dialogue", j, b, t))
         save(out, f"chapter_{i + 1:02d}", img, blocks)
         names.append(f"chapter_{i + 1:02d}")
+    # 7. Real-site style: two jagged bubbles that touch, thin anti-aliased
+    #    outlines on a white page, and a faint grey site watermark.
+    img = Image.new("RGB", (720, 1300), (255, 255, 255))
+    art = artwork(720, 700, 21)
+    d = ImageDraw.Draw(img)
+    img.paste(art, (0, 600))
+    d.polygon([(0, 600), (720, 420), (720, 600)], fill=(255, 255, 255))
+    blocks = []
+    def jagged(poly, text, size, order):
+        d.polygon(poly, fill=(255, 255, 255))
+        d.line(poly + [poly[0]], fill=(25, 25, 25), width=2, joint="curve")
+        xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+        cx, cy = (min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2
+        f = font(size, 500)
+        d.multiline_text((cx, cy), text, font=f, fill=(15, 15, 15), anchor="mm", spacing=int(size * 0.35), align="center")
+        tw, th = text_size(d, text, f, int(size * 0.35))
+        blocks.append(Block(text, "dialogue", order, [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)], [cx - tw // 2, cy - th // 2, tw, th]))
+    jagged([(70, 120), (300, 128), (330, 100), (420, 122), (400, 300), (380, 330), (300, 316), (95, 330), (60, 220)], "이건 최종 무기다.\n우리가 갈 필요는\n없어!", 26, 0)
+    jagged([(410, 240), (690, 228), (680, 470), (480, 500), (450, 560), (440, 500), (395, 480)], "물러서!\n지금 당장!", 30, 1)
+    # Watermark: small light-grey text (site name), partly over the left bubble.
+    wm = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    wd = ImageDraw.Draw(wm)
+    wf = font(15, 400)
+    for (x, y) in [(260, 140), (300, 700), (420, 1050)]:
+        wd.multiline_text((x, y), "가장 빠른 웹툰사이트\n웹툰왕국뉴토끼469", font=wf, fill=(150, 150, 150, 110), spacing=2)
+    img = Image.alpha_composite(img.convert("RGBA"), wm).convert("RGB")
+    save(out, "site_bubbles", img, blocks, ignore="watermark text must not be translated")
+    names.append("site_bubbles")
+
+    # 8. Item window (game-system box): dark textured semi-transparent box with
+    #    a gold frame, partly covered by a diagonal art band; label/value lines,
+    #    a separator and two columns of stats.
+    rnd = random.Random(8)
+    img = artwork(720, 1000, 22)
+    d = ImageDraw.Draw(img)
+    d.polygon([(560, 0), (720, 0), (720, 1000), (600, 1000)], fill=(255, 255, 255))
+    box = Image.new("RGBA", (520, 560), (60, 58, 54, 238))
+    bd = ImageDraw.Draw(box)
+    for _ in range(1500):
+        x, y = rnd.randint(0, 519), rnd.randint(0, 559)
+        g = rnd.randint(48, 74)
+        bd.point((x, y), fill=(g, g, g - 4, 238))
+    for cx, cy in [(14, 14), (506, 14), (14, 546), (506, 546)]:
+        bd.arc([cx - 22, cy - 22, cx + 22, cy + 22], 0, 360, fill=(212, 170, 60, 255), width=4)
+    img.paste(box, (100, 220), box)
+    d = ImageDraw.Draw(img)
+    d.polygon([(100, 220), (330, 220), (100, 380)], fill=(80, 90, 140))  # art over the corner
+    f = font(27, 400)
+    white = (246, 246, 240)
+    head = ["그림자 아이템 : 가봇 Lv.11", "창조 등급: 영웅", "종류: 방어구(몸통)", "스탯 구현률 21%", "방어력 +120"]
+    for i, t in enumerate(head):
+        d.text((150, 270 + i * 44), t, font=f, fill=white)
+    d.line([(140, 520), (560, 520)], fill=white, width=2)
+    d.polygon([(552, 512), (560, 504), (568, 512), (560, 520)], fill=white)
+    left, right = ["근력 +15", "민첩 +18", "감각 +15"], ["체력 +12", "지능 +10"]
+    for i, t in enumerate(left):
+        d.text((150, 560 + i * 46), t, font=f, fill=white)
+    for i, t in enumerate(right):
+        d.text((370, 560 + i * 46), t, font=f, fill=white)
+    blocks.clear()
+    blocks.append(Block("\n".join(head + left + right), "narration", 0, [100, 220, 520, 560], [150, 270, 330, 420]))
+    save(out, "system_box", img, blocks, lines=head + left + right)
+    names.append("system_box")
     return names
 
 

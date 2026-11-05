@@ -29,6 +29,12 @@ OCR and translation run **on your own computer**, by default **inside the browse
   - The original lettering stays. A small English chip is placed in the calmest nearby space, slightly tilted like the effect.
   - Known effects come from a Korean SFX lexicon. Unknown ones are shown as a romanised reading ("GWANG! (sound)") rather than an invented meaning.
   - A "?" marks uncertainty. "Original only" hides the chips.
+- **Item windows and stat sheets keep their structure.**
+  - In game-style system boxes, each line gets its own translation, drawn at the same place, left-aligned like the original, with one font size.
+  - Two-column stat lists stay in two columns, and a sentence that wraps over two lines is translated as one sentence, then spread back over both lines.
+  - Common system words (스탯, 민첩, 방어력, 등급…) use a built-in glossary inside these windows only.
+- **Robust rendering.** Text is measured as the browser actually draws it and must fit its box. It wraps or shrinks; it never runs off the image, even with page zoom or scaled reader containers.
+- **Site watermarks are ignored.** Faint, low-contrast lettering (such as a site's logo text) is not translated. It is reported in the results instead of being hidden silently.
 - **Corrections.** Click any translation to see the Korean original and OCR confidence, fix the Korean, re-translate just that bubble, or edit the English. Edits are saved per image.
 
 ## Two engines

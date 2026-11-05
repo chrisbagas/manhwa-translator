@@ -95,3 +95,52 @@ export function scriptOk(text: string, lang: string): boolean {
   if (lang === 'zh') return /[\u4e00-\u9fff]/.test(text);
   return !!text.trim();
 }
+
+/** Common game-system window vocabulary (written for this project). Applied
+ *  only inside structured item/stat windows, never to dialogue. */
+export const SYSTEM_TERMS_KO: Record<string, string> = {
+  '스탯': 'Stats', '스킬': 'Skill', '액티브 스킬': 'Active Skill', '패시브 스킬': 'Passive Skill', '레벨': 'Level',
+  '근력': 'Strength', '힘': 'Strength', '민첩': 'Agility', '체력': 'Vitality', '지능': 'Intelligence', '감각': 'Perception',
+  '마력': 'Magic Power', '정신력': 'Willpower', '행운': 'Luck', '방어력': 'Defense', '공격력': 'Attack', '마법 방어력': 'Magic Defense',
+  '생명력': 'HP', '마나': 'Mana', '경험치': 'EXP', '등급': 'Grade', '창조 등급': 'Creation Grade', '영웅': 'Hero', '전설': 'Legendary',
+  '희귀': 'Rare', '일반': 'Common', '고급': 'Uncommon', '유일': 'Unique', '신화': 'Mythic', '아이템': 'Item', '종류': 'Type',
+  '방어구': 'Armor', '무기': 'Weapon', '장신구': 'Accessory', '몸통': 'Body', '머리': 'Head', '다리': 'Legs', '구현률': 'Implementation Rate',
+  '필요 마나': 'Mana Cost', '소모 마나': 'Mana Cost', '재사용 대기시간': 'Cooldown', '쿨타임': 'Cooldown', '지속 시간': 'Duration',
+  '퀘스트': 'Quest', '보상': 'Reward', '알림': 'Notice', '상태창': 'Status Window', '칭호': 'Title', '직업': 'Class', '그림자': 'Shadow',
+};
+
+/** Korean line-final particles / connectives: the sentence continues on the next line. */
+export function continuesOnNextLine(line: string): boolean {
+  const t = line.trim();
+  if (/[.!?…:)\]'’"”]$/.test(t)) return false;
+  return /(의|이|가|을|를|은|는|에|에서|에게|와|과|도|로|으로|고|며|면|서|지만|하여|하고|및|,)$/.test(t);
+}
+
+/** Split a translation across n lines with balanced character counts, cutting
+ *  at the word boundary nearest to each 1/n of the total length. */
+export function splitAcross(text: string, n: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (n <= 1 || words.length <= 1) return [words.join(' '), ...Array(Math.max(0, n - 1)).fill('')];
+  const ends: number[] = []; // cumulative length after each word
+  let acc = 0;
+  for (const w of words) { acc += (acc ? 1 : 0) + w.length; ends.push(acc); }
+  const cuts: number[] = [];
+  let from = 0;
+  for (let k = 1; k < n; k++) {
+    const goal = (acc * k) / n;
+    let best = -1, bestD = Infinity;
+    // Leave at least one word for each remaining line.
+    for (let j = from; j < words.length - (n - k); j++) {
+      const d = Math.abs(ends[j] - goal);
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    if (best < 0) break;
+    cuts.push(best + 1);
+    from = best + 1;
+  }
+  const out: string[] = [];
+  let start = 0;
+  for (const c of [...cuts, words.length]) { out.push(words.slice(start, c).join(' ')); start = c; }
+  while (out.length < n) out.push('');
+  return out;
+}

@@ -121,6 +121,20 @@ Model load and warm-up: 3.7 s. RSS after load: 767 MB.
 - Changing the SFX mode re-renders using cached OCR.
 - Service unavailable: guidance is shown and no image is fetched or sent.
 
+### Regressions from real-site screenshots (v0.2.1)
+
+Two new generated fixtures reproduce what a real reader site showed:
+- `site_bubbles`: touching jagged bubbles with thin outlines on a white page, plus a faint site watermark.
+- `system_box`: a textured, semi-transparent item window partly covered by art, with label/value lines and two stat columns.
+
+The built-in e2e renders them under normal styling, `body{zoom:.67}` and a `transform: scale(.8)` reader container, and checks:
+- every translation stays inside its box;
+- one translated line per source line, with no overlaps and one font size per window;
+- the watermark is not translated;
+- overlays stay aligned (≤1.5 px).
+
+All 15 of these checks pass. Python covers the same cases in `test_pipeline.py`.
+
 ### Built-in engine tests
 
 - `npm test` includes 21 engine unit tests: morphology, components, detector post-processing, CTC decoding, tiling re-detection, grouping, render-box separation, translation stage, and the readable-colour guard.

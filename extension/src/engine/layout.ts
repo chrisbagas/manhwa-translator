@@ -2,6 +2,7 @@
 // reading order, classification, style, glyph-only cleanup, SFX placement.
 
 import { components, dilate, distanceTransform, edgeDensity, erode, fillHoles, hex, lum, medianColor, otsu, toGray, type Mask, type Pt, type RGBA } from './imgops';
+export type { RGBA };
 import type { Raster } from './raster';
 import { scriptOk } from './text';
 import type { Bubble, Kind, Style } from '../shared/types';
@@ -123,6 +124,58 @@ export function mergeSharedContainers(groups: TextLine[][], containers: (number[
     if (a && b && iou(a, b) > 0.7) uf.union(i, j);
   }
   return uf.groups(groups).map((gs) => sortLines(gs.flat()));
+}
+
+/** Colour contrast of the strongest ink in a line: 95th percentile of each
+ *  pixel's max-channel difference from the line's median colour. Watermarks
+ *  and faint background lettering score low; real lettering (also coloured
+ *  text such as yellow on white) scores high. */
+export function lineContrast(r: Raster, l: TextLine): number {
+  const [x0, y0, x1, y1] = lineBox(l);
+  return inkContrast(r.read(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)));
+}
+
+export function inkContrast(img: RGBA): number {
+  const n = img.w * img.h;
+  const bg = medianColor(img, () => true)!;
+  const v = new Float32Array(n);
+  for (let i = 0; i < n; i++) v[i] = maxDiff(img.data, i, bg);
+  v.sort();
+  return v[Math.floor(0.95 * (n - 1))];
+}
+
+/** Trim faint columns (e.g. a watermark glued to the end of a line by the
+ *  detector) from both ends of a horizontal line crop. */
+export function trimFaint(crop: RGBA, minDiff = 90): RGBA {
+  const { w, h, data } = crop;
+  const bg = medianColor(crop, () => true)!;
+  let first = -1, last = -1;
+  for (let x = 0; x < w; x++) {
+    let strong = 0;
+    for (let y = 0; y < h; y++) if (maxDiff(data, y * w + x, bg) >= minDiff) strong++;
+    if (strong >= 2) { if (first < 0) first = x; last = x; }
+  }
+  if (first < 0) return crop; // nothing strong: leave it to the contrast filter
+  const margin = Math.ceil(h * 0.2);
+  const a = Math.max(0, first - margin), b = Math.min(w - 1, last + margin);
+  if (a === 0 && b === w - 1) return crop;
+  const out = new Uint8ClampedArray((b - a + 1) * h * 4);
+  for (let y = 0; y < h; y++) out.set(data.subarray((y * w + a) * 4, (y * w + b + 1) * 4), y * (b - a + 1) * 4);
+  return { w: b - a + 1, h, data: out };
+}
+
+/** Fraction of a line's box inside a bubble component (window coords). */
+export function coverage(info: BubbleInfo, b: Box4): number {
+  const [wx0, wy0] = info.window;
+  const m = info.component;
+  let inside = 0, total = 0;
+  const step = Math.max(1, Math.floor((b[3] - b[1]) / 12));
+  for (let y = Math.floor(b[1]); y < b[3]; y += step) for (let x = Math.floor(b[0]); x < b[2]; x += step) {
+    total++;
+    const lx = x - wx0, ly = y - wy0;
+    if (lx >= 0 && ly >= 0 && lx < m.w && ly < m.h && m.data[ly * m.w + lx]) inside++;
+  }
+  return total ? inside / total : 0;
 }
 
 // ---------------------------------------------------------------- bubbles
@@ -253,11 +306,40 @@ export function cleanupPatch(r: Raster, info: BubbleInfo, boxes: Box4[], lh: num
   }
   if (!count || count > 0.6 * compArea) return null;
   const pw = px1 - px0 + 1, ph = py1 - py0 + 1;
+  // Fill masked pixels from their surroundings, ring by ring ("onion peel"),
+  // so gradients and texture continue instead of a flat blotch. Ink pixels
+  // outside the mask (outlines, other lettering) are never used as sources.
+  const col = new Float32Array(W * H * 3);
+  const known = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    col[i * 3] = sub.data[i * 4]; col[i * 3 + 1] = sub.data[i * 4 + 1]; col[i * 3 + 2] = sub.data[i * 4 + 2];
+    known[i] = !d.data[i] && maxDiff(sub.data, i, info.bg) < 28 ? 1 : 0;
+  }
+  let todo: number[] = [];
+  for (let i = 0; i < W * H; i++) if (d.data[i]) todo.push(i);
+  for (let iter = 0; iter < 64 && todo.length; iter++) {
+    const next: number[] = [], filled: number[] = [];
+    for (const i of todo) {
+      const x = i % W, y = (i - x) / W;
+      let n = 0, r = 0, g = 0, b = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if ((dx || dy) && xx >= 0 && yy >= 0 && xx < W && yy < H && known[yy * W + xx]) {
+          const j = (yy * W + xx) * 3; r += col[j]; g += col[j + 1]; b += col[j + 2]; n++;
+        }
+      }
+      if (n) { col[i * 3] = r / n; col[i * 3 + 1] = g / n; col[i * 3 + 2] = b / n; filled.push(i); } else next.push(i);
+    }
+    for (const i of filled) known[i] = 1;
+    if (!filled.length) break;
+    todo = next;
+  }
+  for (const i of todo) { col[i * 3] = info.bg[0]; col[i * 3 + 1] = info.bg[1]; col[i * 3 + 2] = info.bg[2]; }
   const out = new Uint8ClampedArray(pw * ph * 4);
   for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
-    const o = (y * pw + x) * 4;
-    out[o] = info.bg[0]; out[o + 1] = info.bg[1]; out[o + 2] = info.bg[2];
-    out[o + 3] = d.data[(py0 + y) * W + px0 + x] ? 255 : 0;
+    const o = (y * pw + x) * 4, i = (py0 + y) * W + px0 + x;
+    out[o] = col[i * 3]; out[o + 1] = col[i * 3 + 1]; out[o + 2] = col[i * 3 + 2];
+    out[o + 3] = d.data[i] ? 255 : 0;
   }
   return { rgba: { w: pw, h: ph, data: out }, box: [px0 + x0, py0 + y0, pw, ph] };
 }
@@ -402,6 +484,27 @@ export function separateRenderBoxes(regions: RegionDraft[]): void {
     }
     x0 = Math.min(x0, rx0); y0 = Math.min(y0, ry0); x1 = Math.max(x1, rx1); y1 = Math.max(y1, ry1);
     r.render_box = [Math.floor(x0), Math.floor(y0), Math.floor(x1 - x0), Math.floor(y1 - y0)];
+  }
+  // Two drawing boxes must not overlap either: split the overlap between the texts.
+  const drawn = regions.filter((r) => !['marker', 'hidden', 'annotate'].includes(r.render_mode));
+  for (let i = 0; i < drawn.length; i++) for (let j = i + 1; j < drawn.length; j++) {
+    const a = drawn[i], b = drawn[j];
+    const A = [a.render_box[0], a.render_box[1], a.render_box[0] + a.render_box[2], a.render_box[1] + a.render_box[3]];
+    const B = [b.render_box[0], b.render_box[1], b.render_box[0] + b.render_box[2], b.render_box[1] + b.render_box[3]];
+    if (Math.min(A[2], B[2]) <= Math.max(A[0], B[0]) || Math.min(A[3], B[3]) <= Math.max(A[1], B[1])) continue;
+    const at = [a.bbox[0], a.bbox[1], a.bbox[0] + a.bbox[2], a.bbox[1] + a.bbox[3]];
+    const bt = [b.bbox[0], b.bbox[1], b.bbox[0] + b.bbox[2], b.bbox[1] + b.bbox[3]];
+    if (at[2] <= bt[0] || bt[2] <= at[0]) {
+      const [l, rr, lt, rt] = at[2] <= bt[0] ? [A, B, at, bt] : [B, A, bt, at];
+      const mid = Math.floor((lt[2] + rt[0]) / 2);
+      l[2] = Math.max(lt[2], Math.min(l[2], mid - 1)); rr[0] = Math.min(rt[0], Math.max(rr[0], mid + 1));
+    } else {
+      const [t, bo, tt, btt] = at[3] <= bt[1] ? [A, B, at, bt] : [B, A, bt, at];
+      const mid = Math.floor((tt[3] + btt[1]) / 2);
+      t[3] = Math.max(tt[3], Math.min(t[3], mid - 1)); bo[1] = Math.min(btt[1], Math.max(bo[1], mid + 1));
+    }
+    a.render_box = [A[0], A[1], A[2] - A[0], A[3] - A[1]];
+    b.render_box = [B[0], B[1], B[2] - B[0], B[3] - B[1]];
   }
 }
 
