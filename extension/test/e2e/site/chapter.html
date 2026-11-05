@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Test Reader — Chapter 1</title>
+<style>
+  body { margin: 0; font-family: sans-serif; background: #eee; }
+  header { height: 70px; background: #223; display: flex; align-items: center; padding: 0 16px; }
+  header img { height: 50px; }
+  .layout { display: flex; gap: 16px; justify-content: center; }
+  .reader { max-width: 720px; width: 100%; }
+  .reader img { display: block; width: 100%; height: auto; min-height: 200px; background: #ccc; }
+  .sidebar-ad img { width: 160px; height: 600px; }
+  .comments { max-width: 720px; margin: 30px auto; }
+  .comments img.avatar { width: 48px; height: 48px; }
+  .banner { display: block; width: 728px; height: 90px; margin: 10px auto; }
+  @media (max-width: 900px) { .sidebar-ad { display: none; } }
+</style></head>
+<body>
+<header><img src="/img/logo.png" alt="Test Reader logo"></header>
+<img class="banner" src="/img/banner.png" alt="">
+<div class="layout">
+  <main class="reader" id="chapter">
+    <img src="__CDN__/img/chapter_01.png" alt="page 1">
+    <img src="__CDN__/img/chapter_02.png" alt="page 2">
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="__CDN__/img/chapter_03.png" class="lazy" alt="page 3">
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="__CDN__/flaky/chapter_04.png" class="lazy" alt="page 4">
+    <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" data-src="__CDN__/img/chapter_05.png" class="lazy" alt="page 5">
+  </main>
+  <aside class="sidebar-ad"><img src="/img/ad.png" alt="advert"></aside>
+</div>
+<div class="comments"><img class="avatar" src="/img/avatar.png" alt="user"> Great chapter!</div>
+<script>
+  // Minimal lazy loader, like most reader sites use.
+  const io = new IntersectionObserver((ents) => ents.forEach((e) => {
+    if (e.isIntersecting && e.target.dataset.src) { e.target.src = e.target.dataset.src; io.unobserve(e.target); }
+  }), { rootMargin: '200px' });
+  document.querySelectorAll('img.lazy').forEach((i) => io.observe(i));
+  // Infinite-scroll style: the last page is inserted later.
+  setTimeout(() => {
+    const img = document.createElement('img');
+    img.src = '__CDN__/img/chapter_06.png'; img.alt = 'page 6';
+    document.getElementById('chapter').append(img);
+  }, 1500);
+</script>
+</body></html>

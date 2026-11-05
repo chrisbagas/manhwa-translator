@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Lazy without URLs</title>
+<style>body{margin:0} .r{max-width:720px;margin:0 auto} .r img{display:block;width:100%;height:1400px;background:#ddd}
+.r img.loaded{height:auto}</style></head>
+<body><div class="r" id="r"></div>
+<script>
+  // URLs are NOT in the DOM until the page is scrolled near them (some readers
+  // fetch page URLs on demand); only a scroll pass can reveal them.
+  const urls = ['chapter_01', 'chapter_02', 'chapter_03', 'chapter_04'].map((n) => '__CDN__/img/' + n + '.png');
+  const r = document.getElementById('r');
+  const GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  urls.forEach((u, i) => { const img = document.createElement('img'); img.dataset.idx = i; img.src = GIF; r.append(img); });
+  const io = new IntersectionObserver((ents) => ents.forEach((e) => {
+    if (e.isIntersecting && e.target.src === GIF) { e.target.onload = () => (e.target.className = 'loaded'); e.target.src = urls[e.target.dataset.idx]; io.unobserve(e.target); }
+  }));
+  // The first page loads normally; others only when scrolled near.
+  r.querySelectorAll('img').forEach((i, n) => n === 0 ? (i.onload = () => (i.className = 'loaded'), i.src = urls[0]) : io.observe(i));
+</script></body></html>
