@@ -7,7 +7,7 @@ import type { HealthInfo, Settings, TranslateResponse } from '../shared/types';
 import type { EngineHost, EngineRequest, EngineStatus } from '../engine/host';
 import { fetchImage, withReferer } from './acquire';
 
-declare const __TARGET__: 'chrome' | 'firefox';
+declare const __TARGET__: 'chrome' | 'firefox' | 'android';
 // Chrome: MV3 service worker (no Web Workers) -> offscreen document. Firefox: background page.
 const inServiceWorker = __TARGET__ === 'chrome' && typeof document === 'undefined';
 let localHost: Promise<EngineHost> | null = null;

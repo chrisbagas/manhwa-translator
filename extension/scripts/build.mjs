@@ -1,4 +1,5 @@
-// Builds dist/chrome and dist/firefox from one codebase.
+// Builds dist/chrome, dist/firefox and the Android app's web assets from one codebase.
+//   node scripts/build.mjs [--watch] [--targets chrome,firefox,android]
 import { build, context } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -6,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const watch = process.argv.includes('--watch');
+const tArg = process.argv.indexOf('--targets');
+const TARGETS = tArg > 0 ? process.argv[tArg + 1].split(',') : ['chrome', 'firefox', 'android'];
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const base = JSON.parse(readFileSync(join(root, 'manifests/base.json'), 'utf8'));
 
@@ -27,17 +30,24 @@ for (const f of MODEL_FILES) {
   }
 }
 
-for (const target of ['chrome', 'firefox']) {
-  const out = join(root, 'dist', target);
+for (const target of TARGETS) {
+  const android = target === 'android';
+  // The Android app embeds the same content script + engine as web assets.
+  const out = android ? join(root, '../android/app/src/main/assets/www') : join(root, 'dist', target);
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
-  const manifest = { ...base, ...JSON.parse(readFileSync(join(root, `manifests/${target}.json`), 'utf8')), version: pkg.version };
-  writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  if (!android) {
+    const manifest = { ...base, ...JSON.parse(readFileSync(join(root, `manifests/${target}.json`), 'utf8')), version: pkg.version };
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  }
   cpSync(join(root, 'assets/fonts'), join(out, 'fonts'), { recursive: true });
-  cpSync(join(root, 'assets/icons'), join(out, 'icons'), { recursive: true });
-  cpSync(join(root, 'src/popup/popup.html'), join(out, 'popup.html'));
-  cpSync(join(root, 'src/popup/popup.css'), join(out, 'popup.css'));
+  if (!android) {
+    cpSync(join(root, 'assets/icons'), join(out, 'icons'), { recursive: true });
+    cpSync(join(root, 'src/popup/popup.html'), join(out, 'popup.html'));
+    cpSync(join(root, 'src/popup/popup.css'), join(out, 'popup.css'));
+  }
   if (target === 'chrome') cpSync(join(root, 'src/offscreen/offscreen.html'), join(out, 'offscreen.html'));
+  if (android) writeFileSync(join(out, 'engine.html'), '<!doctype html><meta charset="utf-8"><title>Dalbit engine</title><script src="engine.js"></script>\n');
   for (const f of MODEL_FILES) cpSync(join(root, 'assets/models', f), join(out, 'models', f));
   // Optional full-Hangul recogniser (npm run fetch-models -- --ppocr-korean); preferred when it passes the self-test.
   const recognizers = ['korean_g2'];
@@ -75,7 +85,7 @@ for (const target of ['chrome', 'firefox']) {
     outdir: out,
     bundle: true,
     format: 'iife',
-    target: target === 'chrome' ? 'chrome116' : 'firefox128',
+    target: target === 'firefox' ? 'firefox128' : 'chrome116', // Android System WebView is Chromium
     sourcemap: false,
     minify: false, // readable output simplifies Mozilla source review
     legalComments: 'inline',
@@ -83,7 +93,9 @@ for (const target of ['chrome', 'firefox']) {
     minifySyntax: true, // removes the other browser's dead branches; identifiers stay readable
     logLevel: 'warning',
   };
-  const entryPoints = Object.fromEntries(Object.entries(entries).filter(([k]) => target === 'chrome' || k !== 'offscreen').map(([k, v]) => [k, join(root, v)]));
+  const entryPoints = android
+    ? { content: join(root, entries.content), shim: join(root, 'src/android/shim.ts'), engine: join(root, 'src/android/engine.ts') }
+    : Object.fromEntries(Object.entries(entries).filter(([k]) => target === 'chrome' || k !== 'offscreen').map(([k, v]) => [k, join(root, v)]));
   const workerOpts = { ...opts, entryPoints: { 'engine-ocr': join(root, 'src/engine/ocr-worker.ts') }, format: 'esm' };
   if (watch) { await (await context({ ...opts, entryPoints })).watch(); await (await context(workerOpts)).watch(); }
   else { await build({ ...opts, entryPoints }); await build(workerOpts); }
